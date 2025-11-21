@@ -1,0 +1,17 @@
+{
+    "name": "my-opengl-project",
+    "version-string": "1.0.0",
+    "dependencies": [
+        "assimp",
+        "glm",
+        "glfw3",
+        "stb",
+        {
+            "name": "imgui",
+            "features": [
+                "glfw-binding",
+                "opengl3-binding"
+            ]
+        }
+    ]
+}

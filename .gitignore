@@ -1,0 +1,16 @@
+# Visual Studio cache and build folders
+.vs/
+x64/
+Debug/
+Release/
+*.user
+*.pdbs
+*.iobj
+*.ipdb
+
+# vcpkg downloaded files (the other person will download these themselves)
+vcpkg_installed/
+vcpkg/
+
+# Other temporary files
+*.log
