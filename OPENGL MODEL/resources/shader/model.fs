@@ -41,8 +41,6 @@ struct Material
 
 uniform Material material;
 
-// texture color
-vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
 
 
 
@@ -61,6 +59,8 @@ uniform DirLight dirLight;
 
 vec3 CalcDirLight(DirLight dirLight, vec3 normal, vec3 viewDir)
 {
+	vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
+
 	vec3 lightDir = normalize (-dirLight.direction);
 
 	// diffuse shading
@@ -104,6 +104,8 @@ uniform PointLight pointLights[NR_POINT_LIGHTS];
 
 vec3 CalcPointLight (PointLight pointLight, vec3 normal, vec3 fragPos, vec3 viewDir)
 {
+	vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
+
 	vec3 lightDir = normalize (pointLight.position - fragPos);
 	
 	// diffuse
@@ -151,6 +153,8 @@ uniform SpotLight spotLight;
 
 vec3 CalcSpotLight (SpotLight spotLight, vec3 normal, vec3 fragPos, vec3 viewDir)
 {	
+	vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
+
 	vec3 lightDir = normalize (spotLight.position - fragPos);
 
 	// diffuse
@@ -199,6 +203,8 @@ float LinearizeDepth(float depth)
 
 void main()
 {
+	vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
+
 	vec3 norm = normalize (Normal);
 	vec3 viewDir = normalize (viewPos - FragPos);
 	// phase 1: Directional lighting
@@ -213,11 +219,11 @@ void main()
 	// phase 3: Spot light
 	result += CalcSpotLight (spotLight, norm, FragPos, viewDir);
 	
-	if (textureColor.a < 0.5)
+	if (textureColor.a < 0.0)
 		discard;
 
-	float depth = LinearizeDepth(gl_FragCoord.z) / far;
+	//float depth = LinearizeDepth(gl_FragCoord.z) / far;
 
-	FragColor = vec4 (result + vec3(depth), 1.0f);
+	FragColor = vec4 (result, 1.0f);
 
 }

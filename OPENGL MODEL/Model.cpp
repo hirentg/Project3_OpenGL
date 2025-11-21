@@ -271,9 +271,9 @@ int main()
     glEnable(GL_DEPTH_TEST);
 
     // Initialize our shader
-    Shader shader("F:/visual studio crap/repo/OPENGL MODEL/OPENGL MODEL/shader/model.vs", "F:/visual studio crap/repo/OPENGL MODEL/OPENGL MODEL/shader/model.fs");
+    Shader shader("resources/shader/model.vs", "resources/shader/model.fs");
 
-    Shader lightCubeShader{ "F:/visual studio crap/repo/OPENGL LIGHTING/OPENGL LIGHTING/lightVertex.vs",  "F:/visual studio crap/repo/OPENGL LIGHTING/OPENGL LIGHTING/lightFragment.fs" };
+    Shader lightCubeShader{ "resources/shader/lightVertex.vs",  "resources/shader/lightFragment.fs" };
 
     // load models
     currentModel = new Model(modelPath);
