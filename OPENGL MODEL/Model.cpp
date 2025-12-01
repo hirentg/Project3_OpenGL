@@ -572,6 +572,8 @@ int main()
             ImGui::Begin("My name is window, ImGui window");
             // Text that appears in the window
             ImGui::Text("Hello");
+            ImGui::Text("Press B to change between Phong and Blinn-Phong lighting model");
+
             ImGui::ColorEdit3("Screen Color", glm::value_ptr(screenColor));
 
             modelLoading();
