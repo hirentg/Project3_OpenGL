@@ -1,13 +1,19 @@
 #version 330 core
 out vec4 FragColor;
 
-in vec3 Normal;
-in vec3 FragPos;	
-in vec2 TexCoord;	
+in VS_OUT
+{
+	vec2 TexCoord;
+	vec3 Normal;
+	vec3 FragPos;
+} fs_in;
+
 
 uniform vec3 objectColor;
 uniform vec3 lightColor;
 uniform vec3 lightPos;	
+uniform bool blinn;
+
 
 //uniform sampler2D texture_diffuse1;
 
@@ -57,9 +63,12 @@ struct DirLight
 
 uniform DirLight dirLight;
 
+
+// 1/12/2025
+// added blinn phong lighting model
 vec3 CalcDirLight(DirLight dirLight, vec3 normal, vec3 viewDir)
 {
-	vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
+	vec4 textureColor = texture (material.texture_diffuse1, fs_in.TexCoord);
 
 	vec3 lightDir = normalize (-dirLight.direction);
 
@@ -68,7 +77,17 @@ vec3 CalcDirLight(DirLight dirLight, vec3 normal, vec3 viewDir)
 	
 	// specular
 	vec3 reflectDir = reflect(-lightDir, normal);
-	float spec = pow (max (dot (reflectDir, viewDir), 0.0), material.shininess);
+	float spec = 0.0;
+
+	if (blinn)
+	{
+		vec3 halfwayDir = normalize (lightDir + viewDir);
+		spec = pow (max (dot (normal, halfwayDir), 0.0), 32.0f);
+	}
+	else
+	{
+		spec = pow (max (dot (reflectDir, viewDir), 0.0), material.shininess);
+	}
 
 	// combine result
 	vec3 ambient = dirLight.ambient * vec3 (textureColor);
@@ -102,19 +121,30 @@ struct PointLight
 uniform PointLight pointLights[NR_POINT_LIGHTS];
 
 
+// added blinn phong
 vec3 CalcPointLight (PointLight pointLight, vec3 normal, vec3 fragPos, vec3 viewDir)
 {
-	vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
+	vec4 textureColor = texture (material.texture_diffuse1, fs_in.TexCoord);
 
 	vec3 lightDir = normalize (pointLight.position - fragPos);
 	
 	// diffuse
 	float diff = max (dot (lightDir, normal), 0.0);
-	
+
 	// specular
 	vec3 reflectDir = reflect(-lightDir, normal);
-	float spec = pow (max (dot (reflectDir, viewDir), 0.0), material.shininess);
-	
+	float spec = 0.0;
+
+	if (blinn)
+	{
+		vec3 halfwayDir = normalize (lightDir + viewDir);
+		spec = pow (max (dot (normal, halfwayDir), 0.0), 32.0f);
+	}
+	else
+	{
+		spec = pow (max (dot (reflectDir, viewDir), 0.0), material.shininess);
+	}
+
 	// attenuation - light drop off
 	float distance = length (pointLight.position - fragPos);
 	float attenuation = 1.0 / (pointLight.constant + pointLight.linear * distance + pointLight.quadratic * (distance * distance));
@@ -153,7 +183,7 @@ uniform SpotLight spotLight;
 
 vec3 CalcSpotLight (SpotLight spotLight, vec3 normal, vec3 fragPos, vec3 viewDir)
 {	
-	vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
+	vec4 textureColor = texture (material.texture_diffuse1, fs_in.TexCoord);
 
 	vec3 lightDir = normalize (spotLight.position - fragPos);
 
@@ -162,7 +192,17 @@ vec3 CalcSpotLight (SpotLight spotLight, vec3 normal, vec3 fragPos, vec3 viewDir
 	
 	// specular
 	vec3 reflectDir = reflect(-lightDir, normal);
-	float spec = pow (max (dot (reflectDir, viewDir), 0.0), material.shininess);
+	float spec = 0.0;
+
+	if (blinn)
+	{
+		vec3 halfwayDir = normalize (lightDir + viewDir);
+		spec = pow (max (dot (normal, halfwayDir), 0.0), 32.0f);
+	}
+	else
+	{
+		spec = pow (max (dot (reflectDir, viewDir), 0.0), material.shininess);
+	}
 	
 	// theta angle
 	float theta = dot (lightDir, normalize (-spotLight.direction));
@@ -203,21 +243,21 @@ float LinearizeDepth(float depth)
 
 void main()
 {
-	vec4 textureColor = texture (material.texture_diffuse1, TexCoord);
+	vec4 textureColor = texture (material.texture_diffuse1, fs_in.TexCoord);
 
-	vec3 norm = normalize (Normal);
-	vec3 viewDir = normalize (viewPos - FragPos);
+	vec3 norm = normalize (fs_in.Normal);
+	vec3 viewDir = normalize (viewPos - fs_in.FragPos);
 	// phase 1: Directional lighting
 	vec3 result = CalcDirLight (dirLight, norm, viewDir);
 
 	// phase 2: Point lihgts
 	for (int i = 0; i < NR_POINT_LIGHTS; ++i)
 	{
-		result += CalcPointLight(pointLights[i], norm, FragPos, viewDir);
+		result += CalcPointLight(pointLights[i], norm, fs_in.FragPos, viewDir);
 	}
 
 	// phase 3: Spot light
-	result += CalcSpotLight (spotLight, norm, FragPos, viewDir);
+	result += CalcSpotLight (spotLight, norm, fs_in.FragPos, viewDir);
 	
 	if (textureColor.a < 0.0)
 		discard;
