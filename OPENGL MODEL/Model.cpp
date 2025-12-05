@@ -592,6 +592,8 @@ int main()
         shader.setFloat("spotLight.linear", spotLightData.linear);
         shader.setFloat("spotLight.quadratic", spotLightData.quadratic);
 
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, depthMap);
 
         if (currentModel)
         {
