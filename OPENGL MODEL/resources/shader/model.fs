@@ -6,19 +6,22 @@ in VS_OUT
 	vec2 TexCoord;
 	vec3 Normal;
 	vec3 FragPos;
+	vec4 FragPosLightSpace;
 } fs_in;
 
+uniform sampler2D shadowMap;
 
 uniform vec3 objectColor;
 uniform vec3 lightColor;
-uniform vec3 lightPos;	
+uniform vec3 lightPos;		// needed for shadow
 uniform bool blinn;
 
 
 //uniform sampler2D texture_diffuse1;
 
 // for specular lighting in world space. If in viewspace the camera is always at (0,0,0)
-uniform vec3 viewPos;
+
+uniform vec3 viewPos;		// needed for shadow
 
 
 
@@ -64,6 +67,28 @@ struct DirLight
 uniform DirLight dirLight;
 
 
+float shadow = 0.0;
+
+
+float shadowCalculation (vec4 fragPosLightSpace, vec3 normal, vec3 lightDir)
+{
+	vec3 projCoord = fragPosLightSpace.xyz / fragPosLightSpace.w;
+	// transform from NDC to [0,1] range
+	projCoord = projCoord * 0.5 + 0.5;
+	
+	float closestDepth = texture (shadowMap, projCoord.xy).r;
+	float currentDepth = projCoord.z;
+
+	float bias  = max(0.05 * (1.0 - dot(normal, lightDir)), 0.005);
+	float shadow = currentDepth - bias > closestDepth ? 1.0 : 0.0;
+
+	if (projCoord.z > 1.0)
+		shadow = 0.0;
+
+	return shadow;
+}
+
+
 // 1/12/2025
 // added blinn phong lighting model
 vec3 CalcDirLight(DirLight dirLight, vec3 normal, vec3 viewDir)
@@ -94,7 +119,9 @@ vec3 CalcDirLight(DirLight dirLight, vec3 normal, vec3 viewDir)
 	vec3 diffuse = dirLight.diffuse * diff * vec3 (textureColor);
 	vec3 specular = dirLight.specular * spec * vec3 (textureColor);
 
-	return (ambient + diffuse + specular);
+	// calculating shadow
+	shadow = shadowCalculation(fs_in.FragPosLightSpace, normal, lightDir);
+	return ambient + (diffuse + specular) * (1.0 - shadow);
 }
 
 

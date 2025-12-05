@@ -294,6 +294,8 @@ int main()
 
     Shader cubeMapShader{ "resources/shader/cubemap.vs", "resources/shader/cubemap.fs" };
 
+    Shader simpleDepthShader("resources/shader/shadowDepth.vs", "resources/shader/shadowDepth.fs");
+
     // load models
     currentModel = new Model(modelPath);
 
@@ -427,6 +429,37 @@ int main()
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(0);
 
+    // framebuffer for depth map
+    unsigned int depthMapFBO{};
+    glGenFramebuffers(1, &depthMapFBO);
+
+    // depth map resolution
+    unsigned int SHADOW_WIDTH = 1024;
+    unsigned int SHADOW_HEIGHT = 1024;
+
+    unsigned int depthMap{};
+    glGenTextures(1, &depthMap);
+    glBindTexture(GL_TEXTURE_2D, depthMap);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH, SHADOW_HEIGHT,
+        0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_BORDER);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_BORDER);
+    std::vector<float> borderColor{ 1.0f, 1.0f, 1.0f, 1.0f };
+    glTexParameterfv(GL_TEXTURE_2D, GL_TEXTURE_BORDER_COLOR, borderColor.data());
+
+    glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_TEXTURE_2D, depthMap, 0);
+    // tell OpenGL we dont need to render any color data
+    glDrawBuffer(GL_NONE);
+    glDrawBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+    shader.use();
+    shader.setInt("shadowMap", 1);
+
     cubeMapShader.use();
     cubeMapShader.setInt("skybox", 0);
 
@@ -454,13 +487,54 @@ int main()
         deltaTime = currentFrame - lastFrame;
         lastFrame = currentFrame;
 
+        // Shadow mapping
+        // first pass: render the depth map
+       
+        simpleDepthShader.use();
+        glm::mat4 model = glm::mat4(1.0f);
 
-        // Now activate our shader programs
+        // 2. Use lightPos as the first argument
+        float lightDistance = 20.0f; // Adjust based on your scene size
+        glm::vec3 lightPos = -dirLightData.direction * lightDistance;
+        glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+
+        float near_plane = 1.0f;
+        float far_plane = 25.0f;
+        glm::mat4 lightProjection = glm::ortho(-25.0f, 25.0f, -25.0f, 25.0f, near_plane, far_plane);
+        glm::mat4 lightSpaceMatrix = lightProjection * lightView;
+
+        glCullFace(GL_FRONT);
+        simpleDepthShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+        glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
+        glClear(GL_DEPTH_BUFFER_BIT);
+    
+        // render the loaded model
+        if (currentModel)
+        {
+            model = glm::mat4(1.0f);
+            model = glm::scale(model, glm::vec3(modelScale));
+            simpleDepthShader.setMat4("model", model);
+            currentModel->Draw(simpleDepthShader);
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        glCullFace(GL_BACK);
+
+
+        // second render pass: draw as normal with depth map
+        // ----------------------------------
+        // reset viewport
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+
+        //glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
         shader.use();
 
-
         // transformation
-        glm::mat4 model{ glm::mat4(1.0f) };         // set to identity matrix
+        model = glm::mat4(1.0f) ;         // set to identity matrix
         glm::mat4 view{ glm::mat4(1.0f) };          // set to identity matrix
         glm::mat4 projection{ glm::mat4(1.0f) };    // set to identity matrix
 
@@ -475,7 +549,10 @@ int main()
         shader.setMat4("view", view);
         shader.setMat4("projection", projection);
         shader.setBool("blinn", blinn);
+
+
         // for directional lights
+        shader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
         shader.setVec3("dirLight.direction", dirLightData.direction);
         shader.setVec3("dirLight.ambient", dirLightData.ambient);
         shader.setVec3("dirLight.diffuse", dirLightData.diffuse);
@@ -516,9 +593,6 @@ int main()
         shader.setFloat("spotLight.quadratic", spotLightData.quadratic);
 
 
-
-        // render the loaded model
-        //model = glm::translate(model, glm::vec3(0.0f, 0.0f, 0.0f)); // center of the screen
         if (currentModel)
         {
             model = glm::mat4(1.0f);
@@ -526,6 +600,7 @@ int main()
             shader.setMat4("model", model);
             currentModel->Draw(shader);
         }
+
 
         lightCubeShader.use();
         lightCubeShader.setMat4("view", view);
@@ -540,8 +615,6 @@ int main()
             model = glm::scale(model, glm::vec3(0.5f));
             lightCubeShader.setMat4("model", model);
 
-            // Optional: Set light color (if your fragment shader supports it)
-            // lightCubeShader.setVec3("lightColor", glm::vec3(1.0f, 1.0f, 1.0f));
             lightCubeShader.setVec3("lightColor", pointLightData[i].diffuse);
 
             glDrawArrays(GL_TRIANGLES, 0, 36);
@@ -602,6 +675,9 @@ int main()
     glfwTerminate();
     return 0;
 }
+
+
+
 
 
 void modelLoading()
