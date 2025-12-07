@@ -19,7 +19,7 @@
 static constexpr int numCubeLight{ 4 };
 
 // for model loading 
-Model* currentModel = nullptr;
+std::unique_ptr<Model> currentModel = nullptr;
 std::string modelPath = "resources/models/Sponza-master/sponza.obj";
 float modelScale = 0.01f;
 
@@ -290,14 +290,18 @@ int main()
     // Initialize our shader
     Shader shader("resources/shader/model.vs", "resources/shader/model.fs");
 
-    Shader lightCubeShader{ "resources/shader/lightVertex.vs",  "resources/shader/lightFragment.fs" };
+    Shader lightCubeShader{ "resources/shader/lightVertex.vs", "resources/shader/lightFragment.fs" };
 
     Shader cubeMapShader{ "resources/shader/cubemap.vs", "resources/shader/cubemap.fs" };
 
     Shader simpleDepthShader("resources/shader/shadowDepth.vs", "resources/shader/shadowDepth.fs");
 
+    Shader pointDepthShader("resources/shader/shadows/pointDepth.vs", 
+        "resources/shader/shadows/pointDepth.fs", "resources/shader/shadows/geometryDepth.gs");
+    
+
     // load models
-    currentModel = new Model(modelPath);
+    currentModel = std::make_unique<Model>(modelPath);
 
     // cube vertices data
   // this time with Normal vector as the 2nd attribue
@@ -456,15 +460,43 @@ int main()
     glDrawBuffer(GL_NONE);
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
+    
+    // framebuffer point shadows
+    unsigned int pointDepthFBO{};
+    glGenFramebuffers(1, &pointDepthFBO);
+
+    unsigned int depthCubeMap{};
+    glGenTextures(1, &depthCubeMap);
+    glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeMap);
+    for (unsigned int i{ 0 }; i < 6; ++i)
+    {
+        glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_DEPTH_COMPONENT, SHADOW_WIDTH,
+            SHADOW_HEIGHT, 0, GL_DEPTH_COMPONENT, GL_FLOAT, NULL);
+    }
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+
+   // render all 6 faces in 1 pass using geometry shader (dont have to loop 6 times)
+    glBindFramebuffer(GL_FRAMEBUFFER, pointDepthFBO);
+    glFramebufferTexture(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, depthCubeMap, 0);
+    // tell OpenGL we dont need to render any color data
+    glDrawBuffer(GL_NONE);
+    glDrawBuffer(GL_NONE);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
 
     shader.use();
-    shader.setInt("shadowMap", 1);
+    // Use high slots (10 & 11) to avoid conflict with the Mesh class materials (0, 1, 2...)
+    shader.setInt("shadowMapDir", 10);
+    shader.setInt("shadowMapPoint", 11);
 
     cubeMapShader.use();
     cubeMapShader.setInt("skybox", 0);
 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
-
 
 
     // render loop
@@ -488,15 +520,18 @@ int main()
         lastFrame = currentFrame;
 
         // Shadow mapping
-        // first pass: render the depth map
-       
+        // PASS 1: Directional shadow map
+        // ---------------------------------------------------
+
         simpleDepthShader.use();
         glm::mat4 model = glm::mat4(1.0f);
 
         // 2. Use lightPos as the first argument
         float lightDistance = 20.0f; // Adjust based on your scene size
-        glm::vec3 lightPos = -dirLightData.direction * lightDistance;
-        glm::mat4 lightView = glm::lookAt(lightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+        glm::vec3 dirLightPos = -dirLightData.direction * lightDistance;
+        glm::mat4 lightView = glm::lookAt(dirLightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+
+        glm::vec3 lightPos = pointLightPositions[0]; // Use first point light
 
 
         float near_plane = 1.0f;
@@ -506,6 +541,7 @@ int main()
 
         glCullFace(GL_FRONT);
         simpleDepthShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+
         glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
         glBindFramebuffer(GL_FRAMEBUFFER, depthMapFBO);
         glClear(GL_DEPTH_BUFFER_BIT);
@@ -523,78 +559,120 @@ int main()
         glCullFace(GL_BACK);
 
 
-        // second render pass: draw as normal with depth map
-        // ----------------------------------
-        // reset viewport
-        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+        // PASS 2: Point shadow cube map
+        // ---------------------------------------------------
 
-        //glClearColor(0.1f, 0.1f, 0.1f, 1.0f);
+        glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
+        glBindFramebuffer(GL_FRAMEBUFFER, pointDepthFBO);
+        glClear(GL_DEPTH_BUFFER_BIT);
+
+        // For point light shadow
+        float aspect = (float)SHADOW_WIDTH / (float)SHADOW_HEIGHT;
+
+
+        glm::mat4 shadowProj = glm::perspective(glm::radians(90.0f), aspect, near_plane, far_plane);
+
+        // transformation matrix for point light shadow
+        std::vector<glm::mat4> shadowTransform{};
+        shadowTransform.reserve(6);
+
+        shadowTransform.push_back(shadowProj * glm::lookAt(lightPos, lightPos + glm::vec3(1.0, 0.0, 0.0),
+            glm::vec3(0.0, -1.0, 0.0)));
+        shadowTransform.push_back(shadowProj *
+            glm::lookAt(lightPos, lightPos + glm::vec3(-1.0, 0.0, 0.0), glm::vec3(0.0, -1.0, 0.0)));
+        shadowTransform.push_back(shadowProj *
+            glm::lookAt(lightPos, lightPos + glm::vec3(0.0, 1.0, 0.0), glm::vec3(0.0, 0.0, 1.0)));
+        shadowTransform.push_back(shadowProj *
+            glm::lookAt(lightPos, lightPos + glm::vec3(0.0, -1.0, 0.0), glm::vec3(0.0, 0.0, -1.0)));
+        shadowTransform.push_back(shadowProj *
+            glm::lookAt(lightPos, lightPos + glm::vec3(0.0, 0.0, 1.0), glm::vec3(0.0, -1.0, 0.0)));
+        shadowTransform.push_back(shadowProj *
+            glm::lookAt(lightPos, lightPos + glm::vec3(0.0, 0.0, -1.0), glm::vec3(0.0, -1.0, 0.0)));
+
+
+        pointDepthShader.use();
+        model = glm::mat4(1.0);
+        model = glm::scale(model, glm::vec3(modelScale));
+        pointDepthShader.setMat4("model", model);
+        pointDepthShader.setVec3("lightPos", lightPos);        
+        pointDepthShader.setFloat("far_plane", far_plane);     
+
+        for (unsigned int i{ 0 }; i < 6; ++i)
+        {
+            pointDepthShader.setMat4("shadowMatrices[" + std::to_string(i) + "]",
+                shadowTransform[i]);
+        }
+
+        currentModel->Draw(pointDepthShader);  
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);  // Unbind
+
+        // PASS 3: render scene
+        // ---------------------------------------------------
+
+        glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         shader.use();
 
-        // transformation
-        model = glm::mat4(1.0f) ;         // set to identity matrix
-        glm::mat4 view{ glm::mat4(1.0f) };          // set to identity matrix
-        glm::mat4 projection{ glm::mat4(1.0f) };    // set to identity matrix
-
-
-        view = camera.GetViewMatrix();
-        projection = glm::perspective((45.0f), SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
-        shader.setFloat("material.shininess", 32.0f); // Typical range: 8.0 to 256.0
-
-
-        shader.setVec3("viewPos", camera.Position);
+        // --- 1. Matrices & Material ---
+        model = glm::mat4(1.0f);
+        glm::mat4 view = camera.GetViewMatrix();
+        glm::mat4 projection = glm::perspective(glm::radians(45.0f), SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
 
         shader.setMat4("view", view);
         shader.setMat4("projection", projection);
+        shader.setVec3("viewPos", camera.Position);
         shader.setBool("blinn", blinn);
+        shader.setFloat("material.shininess", 32.0f);
 
-
-        // for directional lights
-        shader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+        // --- 2. Directional Light & Shadow Matrix ---
+        shader.setMat4("lightSpaceMatrix", lightSpaceMatrix); // Needed for Dir Shadow calculation
         shader.setVec3("dirLight.direction", dirLightData.direction);
         shader.setVec3("dirLight.ambient", dirLightData.ambient);
         shader.setVec3("dirLight.diffuse", dirLightData.diffuse);
         shader.setVec3("dirLight.specular", dirLightData.specular);
 
-        // for point lights
+        // --- 3. Point Lights (Loop) ---
         for (int i{ 0 }; i < 4; ++i)
         {
-            shader.setVec3("pointLights[" + std::to_string(i) + "].position",
-                pointLightPositions[i]);
-            shader.setVec3("pointLights[" + std::to_string(i) + "].ambient",
-                pointLightData[i].ambient);
-            shader.setVec3("pointLights[" + std::to_string(i) + "].diffuse",
-                pointLightData[i].diffuse);
-            shader.setVec3("pointLights[" + std::to_string(i) + "].specular",
-                pointLightData[i].specular);
-            shader.setFloat("pointLights[" + std::to_string(i) + "].constant",
-                1.0f);
-            shader.setFloat("pointLights[" + std::to_string(i) + "].linear",
-                pointLightData[i].linear);
-            shader.setFloat("pointLights[" + std::to_string(i) + "].quadratic",
-                pointLightData[i].quadratic);
-
+            std::string number = std::to_string(i);
+            shader.setVec3("pointLights[" + number + "].position", pointLightPositions[i]);
+            shader.setVec3("pointLights[" + number + "].ambient", pointLightData[i].ambient);
+            shader.setVec3("pointLights[" + number + "].diffuse", pointLightData[i].diffuse);
+            shader.setVec3("pointLights[" + number + "].specular", pointLightData[i].specular);
+            shader.setFloat("pointLights[" + number + "].constant", 1.0f);
+            shader.setFloat("pointLights[" + number + "].linear", pointLightData[i].linear);
+            shader.setFloat("pointLights[" + number + "].quadratic", pointLightData[i].quadratic);
         }
 
-        // for spotlight - flashlight
+        // --- 4. Point Shadow Specifics ---
+        shader.setFloat("far_plane", far_plane);
+        // Important: Tell the shader which light position matches the shadow map
+        // (We used pointLightPositions[0] in Pass 2 to generate the map)
+        // Only 1 depth map for 1 point light for now
+        shader.setVec3("shadowCasterPos", pointLightPositions[0]);
+
+        // --- 5. Spot Light ---
         shader.setVec3("spotLight.position", camera.Position);
         shader.setVec3("spotLight.direction", camera.Front);
         shader.setFloat("spotLight.cutOff", cos(glm::radians(spotLightData.cutOff)));
         shader.setFloat("spotLight.outerCutOff", cos(glm::radians(spotLightData.outerCutOff)));
-
         shader.setVec3("spotLight.ambient", spotLightData.ambient);
         shader.setVec3("spotLight.diffuse", spotLightData.diffuse);
         shader.setVec3("spotLight.specular", spotLightData.specular);
-
         shader.setFloat("spotLight.constant", 1.0f);
         shader.setFloat("spotLight.linear", spotLightData.linear);
         shader.setFloat("spotLight.quadratic", spotLightData.quadratic);
 
-        glActiveTexture(GL_TEXTURE1);
+        // --- 6. Bind Shadow Maps to high slots ---
+        glActiveTexture(GL_TEXTURE10);
         glBindTexture(GL_TEXTURE_2D, depthMap);
 
+        glActiveTexture(GL_TEXTURE11);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeMap);
+
+        // --- 7. Draw Model (ONCE) ---
         if (currentModel)
         {
             model = glm::mat4(1.0f);
@@ -706,13 +784,12 @@ void modelLoading()
     if (ImGui::Button("Load Model"))
     {
         // delete old model if exist
-        delete currentModel;
         currentModel = nullptr;
 
         // else try to load new model
         try
         {
-            currentModel = new Model(modelPath);
+            currentModel = std::make_unique<Model>(modelPath); 
         }
         catch (...)
         {
