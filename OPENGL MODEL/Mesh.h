@@ -19,16 +19,17 @@ struct Vertex
 	glm::vec3 Position{};
 	glm::vec3 Normal{};
 	glm::vec2 TexCoords{};
-
+	glm::vec3 Tangent{};
+	glm::vec3 Bitangent{};
 };
 
 // Texture data
 struct Texture
 {
-	unsigned int id{};		
+	unsigned int id{};
 	std::string type{};		// e.g. diffuse or specular texture
 	std::string path{};		// for optimization - store the texture path to
-							// compare with other texture
+	// compare with other texture
 };
 
 
@@ -39,7 +40,7 @@ private:
 	unsigned int m_VAO{};
 	unsigned int m_VBO{};
 	unsigned int m_EBO{};
-	
+
 	void setupMesh();
 
 public:
@@ -60,7 +61,10 @@ public:
 
 
 	void Draw(Shader& shader) const;
-
+	unsigned int getVAO()
+	{
+		return m_VAO;
+	}
 };
 
 
@@ -93,7 +97,13 @@ void Mesh::setupMesh()
 	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoords));
 	glEnableVertexAttribArray(2);
 
+	// vertex tangent
+	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Tangent));
+	glEnableVertexAttribArray(3);
 
+	// vertex bitangent
+	glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Bitangent));
+	glEnableVertexAttribArray(4);
 }
 
 
@@ -102,6 +112,8 @@ void Mesh::Draw(Shader& shader) const
 	// define N number of texture and specular textures
 	unsigned int diffuseN{ 1 };
 	unsigned int specularN{ 1 };
+	unsigned int normalNr{ 1 };
+	unsigned int heightNr{ 1 };
 
 	for (unsigned int i{ 0 }; i < textures.size(); ++i)
 	{
@@ -109,13 +121,19 @@ void Mesh::Draw(Shader& shader) const
 		glActiveTexture(GL_TEXTURE0 + i);
 		// retrieve texture number
 		std::string number{};
-		std::string name{ textures[i].type };	
+		std::string name{ textures[i].type };
 
 		if (name == "texture_diffuse")
 			number = std::to_string(diffuseN++);	// assign first, then increment
 
 		else if (name == "texture_specular")
 			number = std::to_string(specularN++);
+
+		else if (name == "texture_normal")
+			number = std::to_string(normalNr++);
+
+		else if (name == "texture_height")
+			number = std::to_string(heightNr++);
 
 		shader.setInt(("material." + name + number).c_str(), i);
 		glBindTexture(GL_TEXTURE_2D, textures[i].id);

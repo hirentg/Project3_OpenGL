@@ -2,17 +2,18 @@
 out vec4 FragColor;
 
 in VS_OUT {
-    vec2 TexCoord;
-    vec3 Normal;
-    vec3 FragPos;
-    vec4 FragPosLightSpace; // Required for Directional Shadows
+    	vec2 TexCoord;
+    	vec3 FragPos;
+    	vec4 FragPosLightSpace; // Required for Directional Shadows
+	mat3 TBN;
 } fs_in;
 
 // --- TEXTURES & MATERIALS ---
 struct Material {
-    sampler2D texture_diffuse1;
-    sampler2D texture_specular1;
-    float shininess;
+    	sampler2D texture_diffuse1;
+    	sampler2D texture_specular1;
+	sampler2D texture_normal1;
+    	float shininess;
 };
 uniform Material material;
 
@@ -61,7 +62,6 @@ uniform bool blinn;
 uniform sampler2D shadowMapDir;     // Directional Shadow Map (2D)
 uniform samplerCube shadowMapPoint; // Point Shadow Map (Cube)
 uniform float far_plane;            // Far plane for point shadows
-
 
 uniform vec3 shadowCasterPos; 
 
@@ -232,15 +232,23 @@ vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir)
     return (ambient + diffuse + specular);
 }
 
+
+
 void main()
 {
-    vec3 norm = normalize(fs_in.Normal);
-    vec3 viewDir = normalize(viewPos - fs_in.FragPos);
+	vec3 normal = texture (material.texture_normal1, fs_in.TexCoord).rgb;
+	// transform normal to range [-1,1]
+	normal = normalize(normal * 2.0 - 1.0);
+
+	// transform normal from tangent to world space (for ease of intergration)
+	normal = normalize (fs_in.TBN * normal);
+
+    	vec3 viewDir = normalize(viewPos - fs_in.FragPos);
     
     // 1. DIRECTIONAL LIGHT
     // ----------------------------------------
-    float dirShadow = CalcDirShadow(fs_in.FragPosLightSpace, norm, normalize(-dirLight.direction));
-    vec3 result = CalcDirLight(dirLight, norm, viewDir, dirShadow);
+    float dirShadow = CalcDirShadow(fs_in.FragPosLightSpace, normal, normalize(-dirLight.direction));
+    vec3 result = CalcDirLight(dirLight, normal, viewDir, dirShadow);
     
     // 2. POINT LIGHTS
     // ----------------------------------------
@@ -259,12 +267,12 @@ void main()
             shadowToApply = pointShadow;
         }
 
-        result += CalcPointLight(pointLights[i], norm, fs_in.FragPos, viewDir, shadowToApply);
+        result += CalcPointLight(pointLights[i], normal, fs_in.FragPos, viewDir, shadowToApply);
     }
     
     // 3. SPOT LIGHT (No shadow map yet)
     // ----------------------------------------
-    result += CalcSpotLight(spotLight, norm, fs_in.FragPos, viewDir);    
+    result += CalcSpotLight(spotLight, normal, fs_in.FragPos, viewDir);    
     
     FragColor = vec4(result, 1.0);
 }

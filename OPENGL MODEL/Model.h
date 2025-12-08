@@ -14,12 +14,8 @@
 
 class Model
 {
-private:
-	// modal data
-	std::vector<Mesh> m_meshes{};
-	std::string m_directory{};
 
-	std::vector<Texture> texture_loaded{};	// store loaded textures
+private:
 
 	// load model with supported Assimp extensions from files and store the
 	// resulting meshes in the mesh vector
@@ -38,6 +34,13 @@ private:
 		std::string typeName);
 
 public:
+	// modal data
+	std::vector<Mesh> m_meshes{};
+	std::string m_directory{};
+
+	std::vector<Texture> texture_loaded{};	// store loaded textures
+
+
 	Model(const std::string& path)
 	{
 		loadModel(path);
@@ -60,8 +63,9 @@ void Model::loadModel(const std::string& path)
 
 	// flipUVs flip the y axis 
 	// (normally the (0,0) coordinate of texture is at the top left)
+	// Add Normal mapping
 	const aiScene* scene{ import.ReadFile(path, aiProcess_Triangulate
-										| aiProcess_FlipUVs) };
+										| aiProcess_FlipUVs | aiProcess_CalcTangentSpace) };
 
 	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode)
 	{
@@ -107,6 +111,7 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 	std::vector<unsigned int> indices{};
 	std::vector<Texture> textures{};
 
+
 	// iterate through each of the mesh vertices
 	for (unsigned int i{ 0 }; i < mesh->mNumVertices; ++i)
 	{
@@ -136,8 +141,19 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 			glm::vec2 vec{};
 			vec.x = mesh->mTextureCoords[0][i].x;
 			vec.y = mesh->mTextureCoords[0][i].y;
-
 			vertex.TexCoords = vec;
+
+			//tangent (normal mapping)
+			vector.x = mesh->mTangents[i].x;
+			vector.y = mesh->mTangents[i].y;
+			vector.z = mesh->mTangents[i].z;
+			vertex.Tangent = vector;
+
+			//bitangent (normal mapping)
+			vector.x = mesh->mBitangents[i].x;
+			vector.y = mesh->mBitangents[i].y;
+			vector.z = mesh->mBitangents[i].z;
+			vertex.Bitangent = vector;
 		}
 
 		else
@@ -169,8 +185,18 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 		std::vector<Texture> specularMaps{ loadMaterialTextures(material,
 									aiTextureType_SPECULAR, "texture_specular") };
 
+		// normap map
+		std::vector<Texture> normalMaps{ loadMaterialTextures(material,
+							aiTextureType_HEIGHT, "texture_normal") };
+
+		//height map
+		std::vector<Texture> heightMaps{ loadMaterialTextures(material,
+							aiTextureType_AMBIENT, "texture_height") };
+
 		textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
 		textures.insert(textures.end(), specularMaps.begin(), specularMaps.end());
+		textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
+		textures.insert(textures.end(), heightMaps.begin(), heightMaps.end());
 
 	}
 
@@ -226,7 +252,7 @@ unsigned int TextureFromFile(const char* path, const std::string& directory)
 	glGenTextures(1, &textureID);
 
 	int width, height, nrComponents;
-	unsigned char* data{ stbi_load(filename.c_str(), &width, &height, &nrComponents, 0)};
+	unsigned char* data{ stbi_load(filename.c_str(), &width, &height, &nrComponents, 0) };
 	if (data)
 	{
 		GLenum format{};
