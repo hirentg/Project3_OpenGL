@@ -75,6 +75,7 @@ SpotLight spotLightData{};
 void directionalLightChange();
 void pointLightChange();
 void spotLightChange();
+void renderQuad();
 
 
 // Attenuation presets based on distance
@@ -299,7 +300,10 @@ int main()
     Shader pointDepthShader("resources/shader/shadows/pointDepth.vs", 
         "resources/shader/shadows/pointDepth.fs", "resources/shader/shadows/geometryDepth.gs");
     
-
+    Shader shaderGeometryPass("resources/shader/deferred/geoDeferred.vs", "resources/shader/deferred/geoDeferred.fs");;
+    Shader shaderLightingPass("resources/shader/deferred/lightingDeferred.vs", "resources/shader/deferred/lightingDeferred.fs");
+    
+    
     // load models
     currentModel = std::make_unique<Model>(modelPath);
 
@@ -488,13 +492,73 @@ int main()
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 
-    shader.use();
-    // Use high slots (10 & 11) to avoid conflict with the Mesh class materials (0, 1, 2...)
-    shader.setInt("shadowMapDir", 10);
-    shader.setInt("shadowMapPoint", 11);
+    // Setup G-buffer
+    unsigned int gBuffer{};
+    glGenFramebuffers(1, &gBuffer);
+    glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+    unsigned int gPosition, gNormal, gAlbedoSpec;
+
+    // position color buffer
+    glGenTextures(1, &gPosition);
+    glBindTexture(GL_TEXTURE_2D, gPosition);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGBA,
+        GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, gPosition, 0);
+
+    // normal buffer
+    glGenTextures(1, &gNormal);
+    glBindTexture(GL_TEXTURE_2D, gNormal);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGBA,
+        GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT1, GL_TEXTURE_2D, gNormal, 0);
+
+    // albedo and specular buffer
+    glGenTextures(1, &gAlbedoSpec);
+    glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, SCR_WIDTH, SCR_HEIGHT, 0, GL_RGBA,
+        GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT2, GL_TEXTURE_2D, gAlbedoSpec, 0);
+
+    // tell opengl which color attachment we will use
+    std::vector<unsigned int> attachments{ GL_COLOR_ATTACHMENT0,
+        GL_COLOR_ATTACHMENT1 , GL_COLOR_ATTACHMENT2 };
+    glDrawBuffers(3, attachments.data());
+
+    // create and attach depth buffer
+    unsigned int rboDepth{};
+    glGenRenderbuffers(1, &rboDepth);
+    glBindRenderbuffer(GL_RENDERBUFFER, rboDepth);
+    glRenderbufferStorage(GL_RENDERBUFFER, GL_DEPTH_COMPONENT, SCR_WIDTH, SCR_HEIGHT);
+    glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_DEPTH_ATTACHMENT, GL_RENDERBUFFER, rboDepth);
+
+    // check if framebuffer is completed
+    if (glCheckFramebufferStatus(GL_FRAMEBUFFER) != GL_FRAMEBUFFER_COMPLETE)
+    {
+        std::cout << "Framebuffer is not completed" << '\n';
+    }
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+    //shader.use();
+    //// Use high slots (10 & 11) to avoid conflict with the Mesh class materials (0, 1, 2...)
+    //shaderLightingPass.setInt("shadowMapDir", 10);
+    //shaderLightingPass.setInt("shadowMapPoint", 11);
 
     cubeMapShader.use();
     cubeMapShader.setInt("skybox", 0);
+
+    shaderLightingPass.use();
+    shaderLightingPass.setInt("gPosition", 0);
+    shaderLightingPass.setInt("gNormal", 1);
+    shaderLightingPass.setInt("gAlbedoSpec", 2);
+    shaderLightingPass.setInt("shadowMapDir", 10);
+    shaderLightingPass.setInt("shadowMapPoint", 11);
 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
@@ -520,13 +584,14 @@ int main()
         lastFrame = currentFrame;
 
         // Shadow mapping
-        // PASS 1: Directional shadow map
+        // PASS 1: SHADOW PASS
         // ---------------------------------------------------
 
+        // Directional shadow
         simpleDepthShader.use();
         glm::mat4 model = glm::mat4(1.0f);
 
-        // 2. Use lightPos as the first argument
+        // Use lightPos as the first argument
         float lightDistance = 20.0f; // Adjust based on your scene size
         glm::vec3 dirLightPos = -dirLightData.direction * lightDistance;
         glm::mat4 lightView = glm::lookAt(dirLightPos, glm::vec3(0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
@@ -559,8 +624,7 @@ int main()
         glCullFace(GL_BACK);
 
 
-        // PASS 2: Point shadow cube map
-        // ---------------------------------------------------
+        // Point shadow cube map
 
         glViewport(0, 0, SHADOW_WIDTH, SHADOW_HEIGHT);
         glBindFramebuffer(GL_FRAMEBUFFER, pointDepthFBO);
@@ -605,82 +669,107 @@ int main()
 
         currentModel->Draw(pointDepthShader);  
 
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);  // Unbind
-
-        // PASS 3: render scene
-        // ---------------------------------------------------
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);  
 
         glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+
+        // PASS 2: render scene into G-buffer
+        // ---------------------------------------------------
+        glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-        shader.use();
-
-        // --- 1. Matrices & Material ---
+        shaderGeometryPass.use();
         model = glm::mat4(1.0f);
         glm::mat4 view = camera.GetViewMatrix();
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
 
-        shader.setMat4("view", view);
-        shader.setMat4("projection", projection);
-        shader.setVec3("viewPos", camera.Position);
-        shader.setBool("blinn", blinn);
-        shader.setFloat("material.shininess", 32.0f);
+        shaderGeometryPass.setMat4("view", view);
+        shaderGeometryPass.setMat4("projection", projection);
 
-        // --- 2. Directional Light & Shadow Matrix ---
-        shader.setMat4("lightSpaceMatrix", lightSpaceMatrix); // Needed for Dir Shadow calculation
-        shader.setVec3("dirLight.direction", dirLightData.direction);
-        shader.setVec3("dirLight.ambient", dirLightData.ambient);
-        shader.setVec3("dirLight.diffuse", dirLightData.diffuse);
-        shader.setVec3("dirLight.specular", dirLightData.specular);
+        if (currentModel)
+        {
+            model = glm::mat4(1.0f);
+            model = glm::scale(model, glm::vec3(modelScale));
+            shaderGeometryPass.setMat4("model", model);
+            currentModel->Draw(shaderGeometryPass);
+        }
+
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+        // PASS 3: LIGHTING PASS
+        // Directional Light & Shadow Matrix
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        // a. Bind G-buffer texture
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D, gPosition);
+        glActiveTexture(GL_TEXTURE1);
+        glBindTexture(GL_TEXTURE_2D, gNormal);
+        glActiveTexture(GL_TEXTURE2);
+        glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+
+        // b. Bind shadow map
+        glActiveTexture(GL_TEXTURE10);
+        glBindTexture(GL_TEXTURE_2D, depthMap);
+        glActiveTexture(GL_TEXTURE11);
+        glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeMap);
+
+        shaderLightingPass.use();
+        shaderLightingPass.setVec3("viewPos", camera.Position);
+        shaderLightingPass.setBool("blinn", blinn);
+        shaderLightingPass.setFloat("material.shininess", 32.0f);
+
+        shaderLightingPass.setMat4("lightSpaceMatrix", lightSpaceMatrix); // Needed for Dir Shadow calculation
+        shaderLightingPass.setVec3("dirLight.direction", dirLightData.direction);
+        shaderLightingPass.setVec3("dirLight.ambient", dirLightData.ambient);
+        shaderLightingPass.setVec3("dirLight.diffuse", dirLightData.diffuse);
+        shaderLightingPass.setVec3("dirLight.specular", dirLightData.specular);
 
         // --- 3. Point Lights (Loop) ---
         for (int i{ 0 }; i < 4; ++i)
         {
             std::string number = std::to_string(i);
-            shader.setVec3("pointLights[" + number + "].position", pointLightPositions[i]);
-            shader.setVec3("pointLights[" + number + "].ambient", pointLightData[i].ambient);
-            shader.setVec3("pointLights[" + number + "].diffuse", pointLightData[i].diffuse);
-            shader.setVec3("pointLights[" + number + "].specular", pointLightData[i].specular);
-            shader.setFloat("pointLights[" + number + "].constant", 1.0f);
-            shader.setFloat("pointLights[" + number + "].linear", pointLightData[i].linear);
-            shader.setFloat("pointLights[" + number + "].quadratic", pointLightData[i].quadratic);
+            shaderLightingPass.setVec3("pointLights[" + number + "].position", pointLightPositions[i]);
+            shaderLightingPass.setVec3("pointLights[" + number + "].ambient", pointLightData[i].ambient);
+            shaderLightingPass.setVec3("pointLights[" + number + "].diffuse", pointLightData[i].diffuse);
+            shaderLightingPass.setVec3("pointLights[" + number + "].specular", pointLightData[i].specular);
+            shaderLightingPass.setFloat("pointLights[" + number + "].constant", 1.0f);
+            shaderLightingPass.setFloat("pointLights[" + number + "].linear", pointLightData[i].linear);
+            shaderLightingPass.setFloat("pointLights[" + number + "].quadratic", pointLightData[i].quadratic);
         }
 
         // --- 4. Point Shadow Specifics ---
-        shader.setFloat("far_plane", far_plane);
+        shaderLightingPass.setFloat("far_plane", far_plane);
         // Important: Tell the shader which light position matches the shadow map
         // (We used pointLightPositions[0] in Pass 2 to generate the map)
         // Only 1 depth map for 1 point light for now
-        shader.setVec3("shadowCasterPos", pointLightPositions[0]);
+        shaderLightingPass.setVec3("shadowCasterPos", pointLightPositions[0]);
 
         // --- 5. Spot Light ---
-        shader.setVec3("spotLight.position", camera.Position);
-        shader.setVec3("spotLight.direction", camera.Front);
-        shader.setFloat("spotLight.cutOff", cos(glm::radians(spotLightData.cutOff)));
-        shader.setFloat("spotLight.outerCutOff", cos(glm::radians(spotLightData.outerCutOff)));
-        shader.setVec3("spotLight.ambient", spotLightData.ambient);
-        shader.setVec3("spotLight.diffuse", spotLightData.diffuse);
-        shader.setVec3("spotLight.specular", spotLightData.specular);
-        shader.setFloat("spotLight.constant", 1.0f);
-        shader.setFloat("spotLight.linear", spotLightData.linear);
-        shader.setFloat("spotLight.quadratic", spotLightData.quadratic);
+        shaderLightingPass.setVec3("spotLight.position", camera.Position);
+        shaderLightingPass.setVec3("spotLight.direction", camera.Front);
+        shaderLightingPass.setFloat("spotLight.cutOff", cos(glm::radians(spotLightData.cutOff)));
+        shaderLightingPass.setFloat("spotLight.outerCutOff", cos(glm::radians(spotLightData.outerCutOff)));
+        shaderLightingPass.setVec3("spotLight.ambient", spotLightData.ambient);
+        shaderLightingPass.setVec3("spotLight.diffuse", spotLightData.diffuse);
+        shaderLightingPass.setVec3("spotLight.specular", spotLightData.specular);
+        shaderLightingPass.setFloat("spotLight.constant", 1.0f);
+        shaderLightingPass.setFloat("spotLight.linear", spotLightData.linear);
+        shaderLightingPass.setFloat("spotLight.quadratic", spotLightData.quadratic);
 
-        // --- 6. Bind Shadow Maps to high slots ---
-        glActiveTexture(GL_TEXTURE10);
-        glBindTexture(GL_TEXTURE_2D, depthMap);
+        renderQuad();
 
-        glActiveTexture(GL_TEXTURE11);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeMap);
 
-        // --- 7. Draw Model (ONCE) ---
-        if (currentModel)
-        {
-            model = glm::mat4(1.0f);
-            model = glm::scale(model, glm::vec3(modelScale));
-            shader.setMat4("model", model);
-            currentModel->Draw(shader);
-        }
-
+        // 4: FORWARD PASS 
+        // ---------------------------------------------------
+        // To draw the skybox correctly behind the object, we need to copy the depth 
+        // buffer from G-buffer
+        glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
+        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        // Blit (copy) depth information
+        glBlitFramebuffer(0, 0, SCR_WIDTH, SCR_HEIGHT, 0, 0, SCR_WIDTH, SCR_HEIGHT,
+            GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
         lightCubeShader.use();
         lightCubeShader.setMat4("view", view);
@@ -700,8 +789,8 @@ int main()
             glDrawArrays(GL_TRIANGLES, 0, 36);
         }
 
+
         // draw the skybox last to save performance
-        //
         glDepthFunc(GL_LEQUAL);
         cubeMapShader.use();
         // remove translation
@@ -723,6 +812,8 @@ int main()
             ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
             // ImGui window creation
             ImGui::Begin("My name is window, ImGui window");
+
+            ImGui::Text("FPS: %.1f (%.3f ms/frame)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
             // Text that appears in the window
             ImGui::Text("Hello");
             ImGui::Text("Press B to change between Phong and Blinn-Phong lighting model");
@@ -1031,4 +1122,96 @@ unsigned int loadCubeMap(const std::vector<std::string>& faces)
     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
 
     return textureID;
+}
+
+// render quad
+unsigned int quadVAO{};
+unsigned int quadVBO{};
+
+void renderQuad()
+{
+    if (!quadVAO)
+    {
+        // Positions
+        glm::vec3 pos1(-1.0, 1.0, 0.0);
+        glm::vec3 pos2(-1.0, -1.0, 0.0);
+        glm::vec3 pos3(1.0, -1.0, 0.0);
+        glm::vec3 pos4(1.0, 1.0, 0.0);
+
+        // Texture coordinates
+        glm::vec2 uv1(0.0, 1.0);
+        glm::vec2 uv2(0.0, 0.0);
+        glm::vec2 uv3(1.0, 0.0);
+        glm::vec2 uv4(1.0, 1.0);
+
+        // Normal
+        glm::vec3 nm(0.0, 0.0, 1.0);
+
+        glm::vec3 tangent1, tangent2;
+        glm::vec3 bitangent1, bitangent2;
+
+        glm::vec3 edge1 = pos2 - pos1;
+        glm::vec3 edge2 = pos3 - pos1;
+
+        glm::vec2 deltaUV1 = uv2 - uv1;
+        glm::vec2 deltaUV2 = uv3 - uv1;
+
+        float f = 1.0 / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
+
+        tangent1.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
+        tangent1.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
+        tangent1.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
+
+        bitangent1.x = f * (deltaUV2.x * edge1.x - deltaUV1.x * edge2.x);
+        bitangent1.y = f * (deltaUV2.x * edge1.y - deltaUV1.x * edge2.y);
+        bitangent1.z = f * (deltaUV2.x * edge1.z - deltaUV1.x * edge2.z);
+
+        // 2nd triangle
+        edge1 = pos3 - pos1;
+        edge2 = pos4 - pos1;
+
+        deltaUV1 = uv3 - uv1;
+        deltaUV2 = uv4 - uv1;
+
+        f = 1.0 / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
+
+        tangent2.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
+        tangent2.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
+        tangent2.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
+
+        bitangent2.x = f * (deltaUV2.x * edge1.x - deltaUV1.x * edge2.x);
+        bitangent2.y = f * (deltaUV2.x * edge1.y - deltaUV1.x * edge2.y);
+        bitangent2.z = f * (deltaUV2.x * edge1.z - deltaUV1.x * edge2.z);
+
+        float quadVertices[] = {
+            // positions            // normal         // texcoords  // tangent                          // bitangent
+            pos1.x, pos1.y, pos1.z, nm.x, nm.y, nm.z, uv1.x, uv1.y, tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
+            pos2.x, pos2.y, pos2.z, nm.x, nm.y, nm.z, uv2.x, uv2.y, tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
+            pos3.x, pos3.y, pos3.z, nm.x, nm.y, nm.z, uv3.x, uv3.y, tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
+
+            pos1.x, pos1.y, pos1.z, nm.x, nm.y, nm.z, uv1.x, uv1.y, tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z,
+            pos3.x, pos3.y, pos3.z, nm.x, nm.y, nm.z, uv3.x, uv3.y, tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z,
+            pos4.x, pos4.y, pos4.z, nm.x, nm.y, nm.z, uv4.x, uv4.y, tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z
+        };
+        // setup plane VAO
+        glGenVertexArrays(1, &quadVAO);
+        glGenBuffers(1, &quadVBO);
+        glBindVertexArray(quadVAO);
+        glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
+        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)0);
+        glEnableVertexAttribArray(1);
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(3 * sizeof(float)));
+        glEnableVertexAttribArray(2);
+        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(6 * sizeof(float)));
+        glEnableVertexAttribArray(3);
+        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(8 * sizeof(float)));
+        glEnableVertexAttribArray(4);
+        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(11 * sizeof(float)));
+
+    }
+
+    glBindVertexArray(quadVAO);
+    glDrawArrays(GL_TRIANGLES, 0, 6);
 }

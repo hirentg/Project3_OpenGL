@@ -1,0 +1,9 @@
+step to render with deferred shading
+
+1. Shadow pass: Generate shadow maps (directional and point shadows)
+
+2. Geometry: Render scene into G-buffer (exclude skybox)
+
+3. Lighting Pass: Render a quad to the screen, send all lighting uniform to the shader
+
+4. Forward pass: Copy the depth buffer, then render the skybox and light cubes
