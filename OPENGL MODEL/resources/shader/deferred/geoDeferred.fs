@@ -21,7 +21,9 @@ void main()
 
 	// store per-fragment normal 
 	vec3 normal = texture (texture_normal1, TexCoord).rgb;
+	// Transform range [0,1] -> [-1,1]
 	normal = normalize (normal * 2.0 - 1.0);
+	normal = normalize(TBN * normal);
 	gNormal = normal;
 	
 	// store diffuse and specular
