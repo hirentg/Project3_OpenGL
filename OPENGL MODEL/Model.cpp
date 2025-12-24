@@ -668,7 +668,6 @@ int main()
         }
 
         currentModel->Draw(pointDepthShader);  
-
         glBindFramebuffer(GL_FRAMEBUFFER, 0);  
 
         glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
@@ -701,6 +700,8 @@ int main()
         // Directional Light & Shadow Matrix
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
         // a. Bind G-buffer texture
+
+        shaderLightingPass.use();
         glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_2D, gPosition);
         glActiveTexture(GL_TEXTURE1);
@@ -714,7 +715,6 @@ int main()
         glActiveTexture(GL_TEXTURE11);
         glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeMap);
 
-        shaderLightingPass.use();
         shaderLightingPass.setVec3("viewPos", camera.Position);
         shaderLightingPass.setBool("blinn", blinn);
         shaderLightingPass.setFloat("material.shininess", 32.0f);
@@ -798,6 +798,7 @@ int main()
         cubeMapShader.setMat4("view", skyboxView);
         cubeMapShader.setMat4("projection", projection);
         glBindVertexArray(skyboxVAO);
+        glActiveTexture(GL_TEXTURE0);
         glBindTexture(GL_TEXTURE_CUBE_MAP, skyboxTexture);
         glDrawArrays(GL_TRIANGLES, 0, 36);
         glDepthFunc(GL_LESS);
