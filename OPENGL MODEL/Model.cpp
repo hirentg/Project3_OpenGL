@@ -16,15 +16,24 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
-static constexpr int numCubeLight{ 4 };
+static constexpr int numCubeLight{ 80 };
 
 // Settings
 float SCR_WIDTH{ 1920.0f };
 float SCR_HEIGHT{ 1080.0f };
 
+// Benchmarking variables
+float shadowPassTime = 0.0f;
+float geometryPassTime = 0.0f;
+float lightingPassTime = 0.0f;
+
 // For deferred debug quad
 const unsigned int debugWidth = SCR_WIDTH / 4.0;
 const unsigned int debugHeight = SCR_HEIGHT / 4.0;
+
+// toggles
+bool useDeferred = true;
+int activeLightCount = 32; // Default starting lights (adjustable)
 
 
 // for model loading 
@@ -232,13 +241,14 @@ void processInput(GLFWwindow* window)
 // load cube map
 unsigned int loadCubeMap(const std::vector<std::string>& faces);
 
-glm::vec3 pointLightPositions[] = {
-glm::vec3(0.7f,  0.2f,  2.0f),
-glm::vec3(2.3f, -3.3f, -4.0f),
-glm::vec3(-4.0f,  2.0f, -12.0f),
-glm::vec3(0.0f,  0.0f, -3.0f)
-};
-
+//glm::vec3 pointLightPositions[] = {
+//glm::vec3(0.7f,  0.2f,  2.0f),
+//glm::vec3(2.3f, -3.3f, -4.0f),
+//glm::vec3(-4.0f,  2.0f, -12.0f),
+//glm::vec3(0.0f,  0.0f, -3.0f)
+//};
+//
+std::vector<glm::vec3> pointLightPositions;
 
 
 int main()
@@ -297,7 +307,7 @@ int main()
     glEnable(GL_DEPTH_TEST);
 
     // Initialize our shader
-    //Shader shader("resources/shader/model.vs", "resources/shader/model.fs");
+    Shader forwardShader("resources/shader/model.vs", "resources/shader/model.fs");
 
     // For light sources
     Shader lightCubeShader{ "resources/shader/lightVertex.vs", "resources/shader/lightFragment.fs" };
@@ -572,6 +582,23 @@ int main()
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
 
+    // lighting setting
+    std::vector<glm::vec3> lightColors;
+    srand(13);
+    for (unsigned int i = 0; i < numCubeLight; i++)
+    {
+        // calculate slightly random offsets
+        float xPos = static_cast<float>(((rand() % 100) / 100.0) * 6.0 - 3.0);
+        float yPos = static_cast<float>(((rand() % 100) / 100.0) * 6.0 - 4.0);
+        float zPos = static_cast<float>(((rand() % 100) / 100.0) * 6.0 - 3.0);
+        pointLightPositions.push_back(glm::vec3(xPos, yPos, zPos));
+        // also calculate random color
+        float rColor = static_cast<float>(((rand() % 100) / 200.0f) + 0.5); // between 0.5 and 1.0
+        float gColor = static_cast<float>(((rand() % 100) / 200.0f) + 0.5); // between 0.5 and 1.0
+        float bColor = static_cast<float>(((rand() % 100) / 200.0f) + 0.5); // between 0.5 and 1.0
+        lightColors.push_back(glm::vec3(rColor, gColor, bColor));
+    }
+
     // render loop
     while (!glfwWindowShouldClose(window))
     {
@@ -595,6 +622,8 @@ int main()
         // Shadow mapping
         // PASS 1: SHADOW PASS
         // ---------------------------------------------------
+        // Start shadow pass timer
+        float timerStart = glfwGetTime();
 
         // Directional shadow
         simpleDepthShader.use();
@@ -631,7 +660,6 @@ int main()
 
         glBindFramebuffer(GL_FRAMEBUFFER, 0);
         glCullFace(GL_BACK);
-
 
         // Point shadow cube map
 
@@ -678,115 +706,206 @@ int main()
 
         currentModel->Draw(pointDepthShader);  
         glBindFramebuffer(GL_FRAMEBUFFER, 0);  
-
         glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+        shadowPassTime = (glfwGetTime() - timerStart) * 1000.0f; // Convert to ms
 
-        // PASS 2: render scene into G-buffer
-        // ---------------------------------------------------
-        glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-
-        shaderGeometryPass.use();
-        model = glm::mat4(1.0f);
         glm::mat4 view = camera.GetViewMatrix();
         glm::mat4 projection = glm::perspective(glm::radians(45.0f), SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
 
-        shaderGeometryPass.setMat4("view", view);
-        shaderGeometryPass.setMat4("projection", projection);
-
-        if (currentModel)
+        if (useDeferred)
         {
-            model = glm::mat4(1.0f);
-            model = glm::scale(model, glm::vec3(modelScale));
-            shaderGeometryPass.setMat4("model", model);
-            currentModel->Draw(shaderGeometryPass);
+            // PASS 2: DEFERRED GEOMETRY PASS
+            // ---------------------------------------------------
+            glBindFramebuffer(GL_FRAMEBUFFER, gBuffer);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            // Start geometry pass timer
+            timerStart = glfwGetTime();
+
+            shaderGeometryPass.use();
+            glm::mat4 view = camera.GetViewMatrix();
+            glm::mat4 projection = glm::perspective(glm::radians(45.0f), SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
+
+            shaderGeometryPass.setMat4("view", view);
+            shaderGeometryPass.setMat4("projection", projection);
+
+            if (currentModel)
+            {
+                model = glm::mat4(1.0f);
+                model = glm::scale(model, glm::vec3(modelScale));
+                shaderGeometryPass.setMat4("model", model);
+                currentModel->Draw(shaderGeometryPass);
+            }
+
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            geometryPassTime = (glfwGetTime() - timerStart) * 1000.0f;
+
+            // PASS 3: DEFERRED LIGHTING PASS
+            // ---------------------------------------------------
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+            timerStart = glfwGetTime();
+
+            shaderLightingPass.use();
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, gPosition);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, gNormal);
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+
+            // Bind shadow maps
+            glActiveTexture(GL_TEXTURE10);
+            glBindTexture(GL_TEXTURE_2D, depthMap);
+            glActiveTexture(GL_TEXTURE11);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeMap);
+
+            shaderLightingPass.setVec3("viewPos", camera.Position);
+            shaderLightingPass.setBool("blinn", blinn); // Blinn toggle
+            shaderLightingPass.setFloat("material.shininess", 32.0f);
+
+            // Send Active Light Count to Shader (Important for performance!)
+            shaderLightingPass.setInt("nr_lights", activeLightCount);
+
+            // -- LIGHT UNIFORMS (Same as your original code, but using activeLightCount) --
+            shaderLightingPass.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+            shaderLightingPass.setVec3("dirLight.direction", dirLightData.direction);
+            shaderLightingPass.setVec3("dirLight.ambient", dirLightData.ambient);
+            shaderLightingPass.setVec3("dirLight.diffuse", dirLightData.diffuse);
+            shaderLightingPass.setVec3("dirLight.specular", dirLightData.specular);
+
+            for (int i{ 0 }; i < activeLightCount; ++i)
+            {
+                std::string number = std::to_string(i);
+                shaderLightingPass.setVec3("pointLights[" + number + "].position", pointLightPositions[i]);
+                shaderLightingPass.setVec3("pointLights[" + number + "].ambient", pointLightData[i].ambient);
+                shaderLightingPass.setVec3("pointLights[" + number + "].diffuse", pointLightData[i].diffuse);
+                shaderLightingPass.setVec3("pointLights[" + number + "].specular", pointLightData[i].specular);
+                shaderLightingPass.setFloat("pointLights[" + number + "].constant", 1.0f);
+                shaderLightingPass.setFloat("pointLights[" + number + "].linear", pointLightData[i].linear);
+                shaderLightingPass.setFloat("pointLights[" + number + "].quadratic", pointLightData[i].quadratic);
+            }
+
+            shaderLightingPass.setFloat("far_plane", far_plane);
+            shaderLightingPass.setVec3("shadowCasterPos", pointLightPositions[0]);
+
+            // Spot Light
+            shaderLightingPass.setVec3("spotLight.position", camera.Position);
+            shaderLightingPass.setVec3("spotLight.direction", camera.Front);
+            shaderLightingPass.setFloat("spotLight.cutOff", cos(glm::radians(spotLightData.cutOff)));
+            shaderLightingPass.setFloat("spotLight.outerCutOff", cos(glm::radians(spotLightData.outerCutOff)));
+            shaderLightingPass.setVec3("spotLight.ambient", spotLightData.ambient);
+            shaderLightingPass.setVec3("spotLight.diffuse", spotLightData.diffuse);
+            shaderLightingPass.setVec3("spotLight.specular", spotLightData.specular);
+            shaderLightingPass.setFloat("spotLight.constant", 1.0f);
+            shaderLightingPass.setFloat("spotLight.linear", spotLightData.linear);
+            shaderLightingPass.setFloat("spotLight.quadratic", spotLightData.quadratic);
+
+            renderQuad();
+
+            lightingPassTime = (glfwGetTime() - timerStart) * 1000.0f;
+
+            // Blit depth buffer for forward rendering (Skybox/Light Cubes)
+            glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
+            glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+            glBlitFramebuffer(0, 0, SCR_WIDTH, SCR_HEIGHT, 0, 0, SCR_WIDTH, SCR_HEIGHT, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+        }
+        else
+        {
+            // ALTERNATIVE: FORWARD RENDERING PASS
+            // ---------------------------------------------------
+            // Reset timers since we arent using deferred steps
+            geometryPassTime = 0.0f;
+            lightingPassTime = 0.0f;
+
+            timerStart = glfwGetTime();
+
+            // 1. Render directly to default buffer
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+            glViewport(0, 0, SCR_WIDTH, SCR_HEIGHT);
+            glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+            forwardShader.use();
+
+            // Standard Matrices
+            glm::mat4 view = camera.GetViewMatrix();
+            glm::mat4 projection = glm::perspective(glm::radians(45.0f), SCR_WIDTH / SCR_HEIGHT, 0.1f, 100.0f);
+            forwardShader.setMat4("projection", projection);
+            forwardShader.setMat4("view", view);
+            forwardShader.setVec3("viewPos", camera.Position);
+
+            forwardShader.setBool("blinn", blinn); // Essential for lighting model match
+            forwardShader.setFloat("material.shininess", 32.0f); // Essential for specular
+
+            // Lighting Uniforms (Must match the deferred setup exactly)
+            forwardShader.setInt("nr_lights", activeLightCount);
+
+            // Shadows
+            glActiveTexture(GL_TEXTURE10);
+            glBindTexture(GL_TEXTURE_2D, depthMap);
+            glActiveTexture(GL_TEXTURE11);
+            glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeMap);
+            forwardShader.setInt("shadowMapDir", 10);
+            forwardShader.setInt("shadowMapPoint", 11);
+            forwardShader.setMat4("lightSpaceMatrix", lightSpaceMatrix);
+            forwardShader.setFloat("far_plane", far_plane);
+            forwardShader.setVec3("shadowCasterPos", pointLightPositions[0]);
+
+            // Directional Light
+            forwardShader.setVec3("dirLight.direction", dirLightData.direction);
+            forwardShader.setVec3("dirLight.ambient", dirLightData.ambient);
+            forwardShader.setVec3("dirLight.diffuse", dirLightData.diffuse);
+            forwardShader.setVec3("dirLight.specular", dirLightData.specular);
+
+            // Point Lights Loop
+            for (int i{ 0 }; i < activeLightCount; ++i)
+            {
+                std::string number = std::to_string(i);
+                forwardShader.setVec3("pointLights[" + number + "].position", pointLightPositions[i]);
+                forwardShader.setVec3("pointLights[" + number + "].ambient", pointLightData[i].ambient);
+                forwardShader.setVec3("pointLights[" + number + "].diffuse", pointLightData[i].diffuse);
+                forwardShader.setVec3("pointLights[" + number + "].specular", pointLightData[i].specular);
+                forwardShader.setFloat("pointLights[" + number + "].constant", 1.0f);
+                forwardShader.setFloat("pointLights[" + number + "].linear", pointLightData[i].linear);
+                forwardShader.setFloat("pointLights[" + number + "].quadratic", pointLightData[i].quadratic);
+            }
+
+            // Spot Light
+            forwardShader.setVec3("spotLight.position", camera.Position);
+            forwardShader.setVec3("spotLight.direction", camera.Front);
+            forwardShader.setFloat("spotLight.cutOff", cos(glm::radians(spotLightData.cutOff)));
+            forwardShader.setFloat("spotLight.outerCutOff", cos(glm::radians(spotLightData.outerCutOff)));
+            forwardShader.setVec3("spotLight.ambient", spotLightData.ambient);
+            forwardShader.setVec3("spotLight.diffuse", spotLightData.diffuse);
+            forwardShader.setVec3("spotLight.specular", spotLightData.specular);
+            forwardShader.setFloat("spotLight.constant", 1.0f);
+            forwardShader.setFloat("spotLight.linear", spotLightData.linear);
+            forwardShader.setFloat("spotLight.quadratic", spotLightData.quadratic);
+
+            // Draw Model
+            if (currentModel)
+            {
+                model = glm::mat4(1.0f);
+                model = glm::scale(model, glm::vec3(modelScale));
+                forwardShader.setMat4("model", model);
+                currentModel->Draw(forwardShader);
+            }
+
+            // Measure Forward Time as "Lighting Pass" time for simplicity in report
+            lightingPassTime = (glfwGetTime() - timerStart) * 1000.0f;
+
         }
 
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 
-        // PASS 3: LIGHTING PASS
-        // Directional Light & Shadow Matrix
-        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-        // a. Bind G-buffer texture
-
-        shaderLightingPass.use();
-        glActiveTexture(GL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, gPosition);
-        glActiveTexture(GL_TEXTURE1);
-        glBindTexture(GL_TEXTURE_2D, gNormal);
-        glActiveTexture(GL_TEXTURE2);
-        glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
-
-        // b. Bind shadow map
-        glActiveTexture(GL_TEXTURE10);
-        glBindTexture(GL_TEXTURE_2D, depthMap);
-        glActiveTexture(GL_TEXTURE11);
-        glBindTexture(GL_TEXTURE_CUBE_MAP, depthCubeMap);
-
-        shaderLightingPass.setVec3("viewPos", camera.Position);
-        shaderLightingPass.setBool("blinn", blinn);
-        shaderLightingPass.setFloat("material.shininess", 32.0f);
-
-        shaderLightingPass.setMat4("lightSpaceMatrix", lightSpaceMatrix); // Needed for Dir Shadow calculation
-        shaderLightingPass.setVec3("dirLight.direction", dirLightData.direction);
-        shaderLightingPass.setVec3("dirLight.ambient", dirLightData.ambient);
-        shaderLightingPass.setVec3("dirLight.diffuse", dirLightData.diffuse);
-        shaderLightingPass.setVec3("dirLight.specular", dirLightData.specular);
-
-        // --- 3. Point Lights (Loop) ---
-        for (int i{ 0 }; i < 4; ++i)
-        {
-            std::string number = std::to_string(i);
-            shaderLightingPass.setVec3("pointLights[" + number + "].position", pointLightPositions[i]);
-            shaderLightingPass.setVec3("pointLights[" + number + "].ambient", pointLightData[i].ambient);
-            shaderLightingPass.setVec3("pointLights[" + number + "].diffuse", pointLightData[i].diffuse);
-            shaderLightingPass.setVec3("pointLights[" + number + "].specular", pointLightData[i].specular);
-            shaderLightingPass.setFloat("pointLights[" + number + "].constant", 1.0f);
-            shaderLightingPass.setFloat("pointLights[" + number + "].linear", pointLightData[i].linear);
-            shaderLightingPass.setFloat("pointLights[" + number + "].quadratic", pointLightData[i].quadratic);
-        }
-
-        // --- 4. Point Shadow Specifics ---
-        shaderLightingPass.setFloat("far_plane", far_plane);
-        // Important: Tell the shader which light position matches the shadow map
-        // (We used pointLightPositions[0] in Pass 2 to generate the map)
-        // Only 1 depth map for 1 point light for now
-        shaderLightingPass.setVec3("shadowCasterPos", pointLightPositions[0]);
-
-        // --- 5. Spot Light ---
-        shaderLightingPass.setVec3("spotLight.position", camera.Position);
-        shaderLightingPass.setVec3("spotLight.direction", camera.Front);
-        shaderLightingPass.setFloat("spotLight.cutOff", cos(glm::radians(spotLightData.cutOff)));
-        shaderLightingPass.setFloat("spotLight.outerCutOff", cos(glm::radians(spotLightData.outerCutOff)));
-        shaderLightingPass.setVec3("spotLight.ambient", spotLightData.ambient);
-        shaderLightingPass.setVec3("spotLight.diffuse", spotLightData.diffuse);
-        shaderLightingPass.setVec3("spotLight.specular", spotLightData.specular);
-        shaderLightingPass.setFloat("spotLight.constant", 1.0f);
-        shaderLightingPass.setFloat("spotLight.linear", spotLightData.linear);
-        shaderLightingPass.setFloat("spotLight.quadratic", spotLightData.quadratic);
-
-        renderQuad();
-
-
-        // 4: FORWARD PASS 
-        // ---------------------------------------------------
-        // To draw the skybox correctly behind the object, we need to copy the depth 
-        // buffer from G-buffer
-        glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
-        glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
-        // Blit (copy) depth information
-        glBlitFramebuffer(0, 0, SCR_WIDTH, SCR_HEIGHT, 0, 0, SCR_WIDTH, SCR_HEIGHT,
-            GL_DEPTH_BUFFER_BIT, GL_NEAREST);
-        glBindFramebuffer(GL_FRAMEBUFFER, 0);
-
+        // PASS 4: Forward pass 
         lightCubeShader.use();
         lightCubeShader.setMat4("view", view);
         lightCubeShader.setMat4("projection", projection);
 
         glBindVertexArray(lightVAO);
 
-        for (int i{ 0 }; i < numCubeLight; ++i)
+        for (int i{ 0 }; i < activeLightCount; ++i)
         {
             model = glm::mat4(1.0f);
             model = glm::translate(model, pointLightPositions[i]);
@@ -858,14 +977,36 @@ int main()
         if (showImGuiWindow)
         {
             ImGui::SetNextWindowSize(ImVec2(400, 300), ImGuiCond_FirstUseEver);
-            // ImGui window creation
-            ImGui::Begin("My name is window, ImGui window");
+            ImGui::Begin("Performance Statistics");
 
-            ImGui::Text("FPS: %.1f (%.3f ms/frame)", ImGui::GetIO().Framerate, 1000.0f / ImGui::GetIO().Framerate);
-            // Text that appears in the window
-            ImGui::Text("Hello");
-            ImGui::Text("Press B to change between Phong and Blinn-Phong lighting model");
+            // --- Performance Data ---
+            ImGui::Text("Total FPS: %.1f", ImGui::GetIO().Framerate);
+            ImGui::Text("Total Frame Time: %.3f ms", 1000.0f / ImGui::GetIO().Framerate);
+            ImGui::Separator();
 
+            // --- Render Settings ---
+            ImGui::Text("Render Pipeline:");
+            if (ImGui::Checkbox("Use Deferred Shading", &useDeferred)) {
+                // Reset times when switching to avoid weird display
+                shadowPassTime = 0.0f;
+                geometryPassTime = 0.0f;
+                lightingPassTime = 0.0f;
+            }
+
+            ImGui::Text("Light Settings:");
+            // Slider to control active lights (1 to 80)
+            ImGui::SliderInt("Active Lights", &activeLightCount, 1, numCubeLight);
+
+            ImGui::Separator();
+            ImGui::Text("Pass Breakdown:");
+            ImGui::Text("Shadow Pass:   %.3f ms", shadowPassTime);
+            if (useDeferred) {
+                ImGui::Text("Geometry Pass: %.3f ms", geometryPassTime);
+                ImGui::Text("Lighting Pass: %.3f ms", lightingPassTime);
+            }
+            else {
+                ImGui::Text("Forward Pass:  %.3f ms", lightingPassTime);
+            }
             ImGui::ColorEdit3("Screen Color", glm::value_ptr(screenColor));
 
             modelLoading();

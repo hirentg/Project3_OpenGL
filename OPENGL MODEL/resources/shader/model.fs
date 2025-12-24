@@ -49,10 +49,13 @@ struct SpotLight {
 };
 
 // --- UNIFORMS ---
-#define NR_POINT_LIGHTS 4
+#define NR_POINT_LIGHTS 100
 uniform DirLight dirLight;
 uniform PointLight pointLights[NR_POINT_LIGHTS];
 uniform SpotLight spotLight;
+
+// control actual number of lights
+uniform int nr_lights;
 
 uniform vec3 viewPos;
 uniform bool blinn;
@@ -255,7 +258,7 @@ void main()
     // Calculate point shadow ONCE for the caster (assumed to be shadowCasterPos)
     float pointShadow = CalcPointShadow(fs_in.FragPos);
 
-    for(int i = 0; i < NR_POINT_LIGHTS; i++)
+    for(int i = 0; i < nr_lights; i++)
     {
         // Check if this specific light is the one casting shadows
         // We use a small epsilon check to see if this light is the shadow caster
