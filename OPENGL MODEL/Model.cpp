@@ -18,12 +18,22 @@
 
 static constexpr int numCubeLight{ 4 };
 
+// Settings
+float SCR_WIDTH{ 1920.0f };
+float SCR_HEIGHT{ 1080.0f };
+
+// For deferred debug quad
+const unsigned int debugWidth = SCR_WIDTH / 4.0;
+const unsigned int debugHeight = SCR_HEIGHT / 4.0;
+
+
 // for model loading 
 std::unique_ptr<Model> currentModel = nullptr;
 std::string modelPath = "resources/models/Sponza-master/sponza.obj";
 float modelScale = 0.01f;
 
 void modelLoading();
+
 
 // screen color
 glm::vec4 screenColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -108,8 +118,6 @@ static int selectSpotlightIndex = 4;
 bool blinn = false;
 bool blinnKeyPress = false;
 
-float SCR_WIDTH{ 1920.0f };
-float SCR_HEIGHT{ 1080.0f };
 
 bool showImGuiWindow{ true };
 
@@ -289,20 +297,21 @@ int main()
     glEnable(GL_DEPTH_TEST);
 
     // Initialize our shader
-    Shader shader("resources/shader/model.vs", "resources/shader/model.fs");
+    //Shader shader("resources/shader/model.vs", "resources/shader/model.fs");
 
+    // For light sources
     Shader lightCubeShader{ "resources/shader/lightVertex.vs", "resources/shader/lightFragment.fs" };
-
     Shader cubeMapShader{ "resources/shader/cubemap.vs", "resources/shader/cubemap.fs" };
 
+    // For Shadow mapping
     Shader simpleDepthShader("resources/shader/shadowDepth.vs", "resources/shader/shadowDepth.fs");
-
     Shader pointDepthShader("resources/shader/shadows/pointDepth.vs", 
         "resources/shader/shadows/pointDepth.fs", "resources/shader/shadows/geometryDepth.gs");
     
+    // For deferred shading
     Shader shaderGeometryPass("resources/shader/deferred/geoDeferred.vs", "resources/shader/deferred/geoDeferred.fs");;
     Shader shaderLightingPass("resources/shader/deferred/lightingDeferred.vs", "resources/shader/deferred/lightingDeferred.fs");
-    
+    Shader debugDeferred("resources/shader/deferred/debug.vs", "resources/shader/deferred/debug.fs");
     
     // load models
     currentModel = std::make_unique<Model>(modelPath);
@@ -803,6 +812,44 @@ int main()
         glDrawArrays(GL_TRIANGLES, 0, 36);
         glDepthFunc(GL_LESS);
 
+        // debug quad
+        // 1. Save original viewport
+        GLint viewport[4];
+        glGetIntegerv(GL_VIEWPORT, viewport);
+
+        // 2. setup debug rendering
+        debugDeferred.use();
+        // render on top of everything
+        glDisable(GL_DEPTH_TEST);
+        glActiveTexture(GL_TEXTURE0);
+
+        // Debug quad (Top-Bottom: Position, Normal, Albedo, Specular)
+        // Position
+        glViewport(SCR_WIDTH - debugWidth, SCR_HEIGHT - debugHeight, debugWidth, debugHeight);
+        glBindTexture(GL_TEXTURE_2D, gPosition);
+        debugDeferred.setInt("mode", 0);    // raw RGB value
+        renderQuad();
+
+        // Normal
+        glViewport(SCR_WIDTH - debugWidth, SCR_HEIGHT - (debugHeight * 2), debugWidth, debugHeight);
+        glBindTexture(GL_TEXTURE_2D, gNormal);
+        debugDeferred.setInt("mode", 2);    // raw RGB value
+        renderQuad();
+
+        // Albedo
+        glViewport(SCR_WIDTH - debugWidth, SCR_HEIGHT - (debugHeight * 3), debugWidth, debugHeight);
+        glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+        debugDeferred.setInt("mode", 0);    // raw RGB value
+        renderQuad();
+
+        glViewport(SCR_WIDTH - debugWidth, SCR_HEIGHT - (debugHeight * 4), debugWidth, debugHeight);
+        glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+        debugDeferred.setInt("mode", 1);    // raw RGB value
+        renderQuad();
+
+        // 3. Restore original state
+        glViewport(viewport[0], viewport[1], viewport[2], viewport[3]);
+        glEnable(GL_DEPTH_TEST);
 
         // call every time resizing a window
         //glfwSetFramebufferSizeCallback(window, framebuffer_size_callback);
