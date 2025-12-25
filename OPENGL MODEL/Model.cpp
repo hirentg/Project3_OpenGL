@@ -5,10 +5,11 @@
 #include <cmath>
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <random>
+
 #include "stb_image.h"
 #include "Shader.h"
 #include "Camera.h"
-#include "Mesh.h"
 #include "Model.h"
 
 
@@ -16,7 +17,7 @@
 #include "imgui_impl_glfw.h"
 #include "imgui_impl_opengl3.h"
 
-static constexpr int numCubeLight{ 80 };
+static constexpr int numCubeLight{ 500 };
 
 // Settings
 float SCR_WIDTH{ 1920.0f };
@@ -35,6 +36,11 @@ const unsigned int debugHeight = SCR_HEIGHT / 4.0;
 bool useDeferred = true;
 int activeLightCount = 32; // Default starting lights (adjustable)
 
+// for linear interpolation
+float lerp(float a, float b, float f)
+{
+    return a + f * (b - a);
+}
 
 // for model loading 
 std::unique_ptr<Model> currentModel = nullptr;
@@ -323,6 +329,11 @@ int main()
     Shader shaderLightingPass("resources/shader/deferred/lightingDeferred.vs", "resources/shader/deferred/lightingDeferred.fs");
     Shader debugDeferred("resources/shader/deferred/debug.vs", "resources/shader/deferred/debug.fs");
     
+    // For SSAO
+    Shader ssaoShader("resources/shader/ssao/ssao.vs", "resources/shader/ssao/ssao.fs");
+    Shader ssaoBlur("resources/shader/ssao/blur.vs", "resources/shader/ssao/blur.fs");
+
+
     // load models
     currentModel = std::make_unique<Model>(modelPath);
 
@@ -564,10 +575,86 @@ int main()
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
 
-    //shader.use();
-    //// Use high slots (10 & 11) to avoid conflict with the Mesh class materials (0, 1, 2...)
-    //shaderLightingPass.setInt("shadowMapDir", 10);
-    //shaderLightingPass.setInt("shadowMapPoint", 11);
+    // SSAO configuration
+    // Distribute 64 random sample values inside the hemisphere
+    std::uniform_real_distribution<float> randomFloat{ 0.0, 1.0 };
+    std::default_random_engine generator{};
+    std::vector<glm::vec3> ssaoKernel{};
+    constexpr int kernelSize {64};
+
+    for (unsigned int i{ 0 }; i < kernelSize; ++i)
+    {
+        glm::vec3 sample{
+            randomFloat(generator) * 2.0 - 1.0,     // vary in range [-1,1]
+            randomFloat(generator) * 2.0 - 1.0,
+            randomFloat(generator)          // vary in range [0,1]
+        };
+        
+        sample = glm::normalize(sample);
+        sample *= randomFloat(generator);
+
+        // find a point between 2 values (linear interpolation) to distribute
+        // more kernel samples around the center
+        float scale = (float)i / 64.0f;
+        scale = lerp(0.1f, 0.1f, scale * scale);
+        sample *= scale;
+        ssaoKernel.push_back(sample);
+    }
+
+    // Use noise to increase sample count (without sacrificing performance)
+    std::vector<glm::vec3> ssaoNoise{ };
+    constexpr int noiseSize{ 16 };
+    for (unsigned int i{ 0 }; i < noiseSize; ++i)
+    {
+        glm::vec3 noise{
+            randomFloat(generator) * 2.0 - 1.0,     // vary in range [-1,1]
+            randomFloat(generator) * 2.0 - 1.0,
+            0.0f   // we want to rotate around z axis
+        };
+        ssaoNoise.push_back(noise);
+    }
+
+    // Store noise in a 4x4 texture
+    unsigned int noiseTexture{};
+    glGenTextures(1, &noiseTexture);
+    glBindTexture(GL_TEXTURE_2D, noiseTexture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 4, 4, 0, GL_RGB, GL_FLOAT, ssaoNoise.data());
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+
+    // SSAO buffer
+    unsigned int ssaoFBO{};
+    glGenFramebuffers(1, &ssaoFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, ssaoFBO);
+
+    // ambient occlusion
+    unsigned int ssaoColorBuffer{};
+    glGenTextures(1, &ssaoColorBuffer);
+    glBindTexture(GL_TEXTURE_2D, ssaoColorBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, SCR_WIDTH, SCR_HEIGHT, 0, GL_RED, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+        ssaoColorBuffer, 0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
+    // Ambiant occlusion blur
+    unsigned int ssaoBlurFBO{};
+    unsigned int ssaoBlurColorBuffer{};
+    glGenFramebuffers(1, &ssaoBlurFBO);
+    glBindFramebuffer(GL_FRAMEBUFFER, ssaoBlurFBO);
+    glGenTextures(1, &ssaoBlurColorBuffer);
+    glBindTexture(GL_TEXTURE_2D, ssaoBlurColorBuffer);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RED, SCR_WIDTH, SCR_HEIGHT, 0, GL_RED, GL_FLOAT, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D,
+        ssaoBlurColorBuffer,0);
+    glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
 
     cubeMapShader.use();
     cubeMapShader.setInt("skybox", 0);
@@ -576,8 +663,20 @@ int main()
     shaderLightingPass.setInt("gPosition", 0);
     shaderLightingPass.setInt("gNormal", 1);
     shaderLightingPass.setInt("gAlbedoSpec", 2);
+    shaderLightingPass.setInt("ssao", 3);
+    // Use high slots (10 & 11) to avoid conflict with the Mesh class materials (0, 1, 2...)
     shaderLightingPass.setInt("shadowMapDir", 10);
     shaderLightingPass.setInt("shadowMapPoint", 11);
+
+    // ssao
+    ssaoShader.use();
+    ssaoShader.setInt("gPosition", 0);
+    ssaoShader.setInt("gNormal", 1);
+    ssaoShader.setInt("texNoise", 2);
+    ssaoShader.setVec2("noiseScale", SCR_WIDTH / 4.0, SCR_HEIGHT / 4.0);
+
+    ssaoBlur.use();
+    ssaoBlur.setInt("ssaoInput", 0);
 
     //glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
 
@@ -740,6 +839,38 @@ int main()
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
             geometryPassTime = (glfwGetTime() - timerStart) * 1000.0f;
 
+            // SSAO GENERATION PASS
+            ssaoShader.use();
+            glBindFramebuffer(GL_FRAMEBUFFER, ssaoFBO);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, gPosition);
+            glActiveTexture(GL_TEXTURE1);
+            glBindTexture(GL_TEXTURE_2D, gNormal);
+            glActiveTexture(GL_TEXTURE2);
+            glBindTexture(GL_TEXTURE_2D, noiseTexture);
+            // send kernel + rotation
+            for (unsigned int i{ 0 }; i < kernelSize; ++i)
+            {
+                ssaoShader.setVec3("samples[" + std::to_string(i) + "]", ssaoKernel[i]);
+            }
+            ssaoShader.setMat4("projection", projection);
+            ssaoShader.setMat4("view", view);
+            renderQuad();
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+            // SSAO BLUR PASS
+            glBindFramebuffer(GL_FRAMEBUFFER, ssaoBlurFBO);
+            glClear(GL_COLOR_BUFFER_BIT);
+
+            ssaoBlur.use();
+            glActiveTexture(GL_TEXTURE0);
+            glBindTexture(GL_TEXTURE_2D, ssaoColorBuffer);
+            renderQuad();
+            glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+
             // PASS 3: DEFERRED LIGHTING PASS
             // ---------------------------------------------------
             glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -752,6 +883,8 @@ int main()
             glBindTexture(GL_TEXTURE_2D, gNormal);
             glActiveTexture(GL_TEXTURE2);
             glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
+            glActiveTexture(GL_TEXTURE3);
+            glBindTexture(GL_TEXTURE_2D, ssaoBlurColorBuffer);
 
             // Bind shadow maps
             glActiveTexture(GL_TEXTURE10);
@@ -763,10 +896,9 @@ int main()
             shaderLightingPass.setBool("blinn", blinn); // Blinn toggle
             shaderLightingPass.setFloat("material.shininess", 32.0f);
 
-            // Send Active Light Count to Shader (Important for performance!)
+            // Send Active Light Count to Shader 
             shaderLightingPass.setInt("nr_lights", activeLightCount);
 
-            // -- LIGHT UNIFORMS (Same as your original code, but using activeLightCount) --
             shaderLightingPass.setMat4("lightSpaceMatrix", lightSpaceMatrix);
             shaderLightingPass.setVec3("dirLight.direction", dirLightData.direction);
             shaderLightingPass.setVec3("dirLight.ambient", dirLightData.ambient);
@@ -804,7 +936,7 @@ int main()
 
             lightingPassTime = (glfwGetTime() - timerStart) * 1000.0f;
 
-            // Blit depth buffer for forward rendering (Skybox/Light Cubes)
+            // Blit (copy) depth buffer for forward rendering (Skybox/Light Cubes)
             glBindFramebuffer(GL_READ_FRAMEBUFFER, gBuffer);
             glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
             glBlitFramebuffer(0, 0, SCR_WIDTH, SCR_HEIGHT, 0, 0, SCR_WIDTH, SCR_HEIGHT, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
@@ -952,7 +1084,7 @@ int main()
         // Normal
         glViewport(SCR_WIDTH - debugWidth, SCR_HEIGHT - (debugHeight * 2), debugWidth, debugHeight);
         glBindTexture(GL_TEXTURE_2D, gNormal);
-        debugDeferred.setInt("mode", 2);    // raw RGB value
+        debugDeferred.setInt("mode", 2);    
         renderQuad();
 
         // Albedo
@@ -963,7 +1095,7 @@ int main()
 
         glViewport(SCR_WIDTH - debugWidth, SCR_HEIGHT - (debugHeight * 4), debugWidth, debugHeight);
         glBindTexture(GL_TEXTURE_2D, gAlbedoSpec);
-        debugDeferred.setInt("mode", 1);    // raw RGB value
+        debugDeferred.setInt("mode", 1);    
         renderQuad();
 
         // 3. Restore original state

@@ -9,9 +9,12 @@ in vec3 Normal;
 in vec2 TexCoord;
 in mat3 TBN;
 
-uniform sampler2D texture_diffuse1;
-uniform sampler2D specular_diffuse1;
-uniform sampler2D texture_normal1;
+struct Material {
+    sampler2D texture_diffuse1;
+    sampler2D texture_specular1;
+    sampler2D texture_normal1;
+};
+uniform Material material;
 
 
 void main()
@@ -20,14 +23,14 @@ void main()
 	gPosition = FragPos;
 
 	// store per-fragment normal 
-	vec3 normal = texture (texture_normal1, TexCoord).rgb;
+	vec3 normal = texture (material.texture_normal1, TexCoord).rgb;
 	// Transform range [0,1] -> [-1,1]
 	normal = normalize (normal * 2.0 - 1.0);
 	normal = normalize(TBN * normal);
 	gNormal = normal;
 	
 	// store diffuse and specular
-	gAlbedoSpec.rgb = texture (texture_diffuse1, TexCoord).rgb;
+	gAlbedoSpec.rgb = texture (material.texture_diffuse1, TexCoord).rgb;
 
-	gAlbedoSpec.a = texture (specular_diffuse1, TexCoord).r;
+	gAlbedoSpec.a = texture (material.texture_specular1, TexCoord).r;
 }

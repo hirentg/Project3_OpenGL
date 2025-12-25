@@ -72,6 +72,9 @@ uniform sampler2D gAlbedoSpec;
 // Needed to transform G-buffer position to light space manually (calculate shadow)
 uniform mat4 lightSpaceMatrix;
 
+// for SSAO
+uniform sampler2D ssao;
+
 // --- FUNCTIONS ---
 
 // 1. DIRECTIONAL SHADOW CALCULATION 
@@ -133,7 +136,7 @@ float CalcPointShadow(vec3 fragPos)
 
 
 
-vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir, float shadow, vec3 albedo, float specularVal)
+vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir, float shadow, vec3 albedo, float specularVal, float AmbientOcclusion)
 {
     vec3 lightDir = normalize(-light.direction);
     
@@ -154,7 +157,7 @@ vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir, float shadow, vec3 
     }
 
     // combine results
-    vec3 ambient = light.ambient * albedo;
+    vec3 ambient = light.ambient * albedo * AmbientOcclusion;
     vec3 diffuse = light.diffuse * diff * albedo;
     vec3 specular = light.specular * spec * vec3(specularVal);
     
@@ -162,7 +165,7 @@ vec3 CalcDirLight(DirLight light, vec3 normal, vec3 viewDir, float shadow, vec3 
     return (ambient + (1.0 - shadow) * (diffuse + specular));
 }
 
-vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir, float shadow, vec3 albedo, float specularVal)
+vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir, float shadow, vec3 albedo, float specularVal, float AmbientOcclusion)
 {
     vec3 lightDir = normalize(light.position - fragPos);
     
@@ -187,7 +190,7 @@ vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir, f
     float attenuation = 1.0 / (light.constant + light.linear * distance + light.quadratic * (distance * distance));    
     
     // combine results
-    vec3 ambient = light.ambient * albedo;
+    vec3 ambient = light.ambient * albedo * AmbientOcclusion;
     vec3 diffuse = light.diffuse * diff * albedo;
     vec3 specular = light.specular * spec * vec3(specularVal);
     
@@ -199,7 +202,7 @@ vec3 CalcPointLight(PointLight light, vec3 normal, vec3 fragPos, vec3 viewDir, f
     return (ambient + (1.0 - shadow) * (diffuse + specular));
 }
 
-vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 albedo, float specularVal)
+vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir, vec3 albedo, float specularVal, float AmbientOcclusion)
 {
     vec3 lightDir = normalize(light.position - fragPos);
     
@@ -229,7 +232,7 @@ vec3 CalcSpotLight(SpotLight light, vec3 normal, vec3 fragPos, vec3 viewDir, vec
     float intensity = clamp((theta - light.outerCutOff) / epsilon, 0.0, 1.0);
     
     // combine results
-    vec3 ambient = light.ambient * albedo;
+    vec3 ambient = light.ambient * albedo * AmbientOcclusion;
     vec3 diffuse = light.diffuse * diff * albedo;
     vec3 specular = light.specular * spec * vec3(specularVal);
     
@@ -248,6 +251,7 @@ void main()
 	vec3 FragPos = texture (gPosition, TexCoord).rgb;
 	vec3 Albedo = texture (gAlbedoSpec, TexCoord).rgb;
 	float Specular = texture (gAlbedoSpec, TexCoord).a;
+	float AmbientOcclusion = texture (ssao, TexCoord).r;
 
 	// Calculate shadow coordiante manually
 	// From the world-space FragPos, we can find where shadow coordinate is in the 
@@ -259,7 +263,7 @@ void main()
     // 1. DIRECTIONAL LIGHT
     // ----------------------------------------
     float dirShadow = CalcDirShadow(FragPosLightSpace, Normal, normalize(-dirLight.direction));
-    vec3 result = CalcDirLight(dirLight, Normal, viewDir, dirShadow, Albedo, Specular);
+    vec3 result = CalcDirLight(dirLight, Normal, viewDir, dirShadow, Albedo, Specular, AmbientOcclusion);
     
     // 2. POINT LIGHTS
     // ----------------------------------------
@@ -278,12 +282,12 @@ void main()
             shadowToApply = pointShadow;
         }
 
-        result += CalcPointLight(pointLights[i], Normal, FragPos, viewDir, shadowToApply, Albedo, Specular);
+        result += CalcPointLight(pointLights[i], Normal, FragPos, viewDir, shadowToApply, Albedo, Specular, AmbientOcclusion);
     }
     
     // 3. SPOT LIGHT (No shadow map yet)
     // ----------------------------------------
-    result += CalcSpotLight(spotLight, Normal, FragPos, viewDir, Albedo, Specular);    
+    result += CalcSpotLight(spotLight, Normal, FragPos, viewDir, Albedo, Specular, AmbientOcclusion);    
     
     FragColor = vec4(result, 1.0);
 }
