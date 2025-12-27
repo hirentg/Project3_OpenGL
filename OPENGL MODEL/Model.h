@@ -188,7 +188,13 @@ Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
 		// normap map
 		std::vector<Texture> normalMaps{ loadMaterialTextures(material,
 							aiTextureType_HEIGHT, "texture_normal") };
-
+		// if no normal map exists, try displacement map
+		if (normalMaps.empty())
+		{
+			std::vector<Texture> dispMaps = loadMaterialTextures(material,
+				aiTextureType_DISPLACEMENT, "texture_normal");
+			normalMaps.insert(normalMaps.end(), dispMaps.begin(), dispMaps.end());
+		}
 		//height map
 		std::vector<Texture> heightMaps{ loadMaterialTextures(material,
 							aiTextureType_AMBIENT, "texture_height") };

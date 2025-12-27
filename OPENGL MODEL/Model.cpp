@@ -866,6 +866,7 @@ int main()
 
             ssaoBlur.use();
             glActiveTexture(GL_TEXTURE0);
+            // read from ssao
             glBindTexture(GL_TEXTURE_2D, ssaoColorBuffer);
             renderQuad();
             glBindFramebuffer(GL_FRAMEBUFFER, 0);
