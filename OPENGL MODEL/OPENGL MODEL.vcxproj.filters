@@ -19,6 +19,9 @@
     <Filter Include="Header Files\imgui">
       <UniqueIdentifier>{32263204-392f-4bdf-bff0-bb9192bfa607}</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\class implementation">
+      <UniqueIdentifier>{b1f75428-88e4-4a4e-8d13-8332beb4727b}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="glad.c">
@@ -51,8 +54,17 @@
     <ClCompile Include="main.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="model.cpp">
+    <ClCompile Include="load_object.cpp">
       <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="openFile.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="Mesh.cpp">
+      <Filter>Source Files\class implementation</Filter>
+    </ClCompile>
+    <ClCompile Include="Model.cpp">
+      <Filter>Source Files\class implementation</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -96,6 +108,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="Model.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="GpuTimer.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

@@ -49,8 +49,6 @@ std::unique_ptr<Model> currentModel = nullptr;
 std::string modelPath = "resources/models/Sponza-master/sponza.obj";
 float modelScale = 0.01f;
 
-void modelLoading();
-
 
 // screen color
 glm::vec4 screenColor(0.0f, 0.0f, 0.0f, 1.0f);
@@ -1024,7 +1022,7 @@ int main()
             }
             ImGui::ColorEdit3("Screen Color", glm::value_ptr(screenColor));
 
-            modelLoading();
+            modelLoading(currentModel, modelPath, modelScale);
             directionalLightChange();
             pointLightChange();
             spotLightChange();
@@ -1052,52 +1050,6 @@ int main()
 }
 
 
-
-
-
-void modelLoading()
-{
-
-    ImGui::InputText("Model path", modelPath.data(), modelPath.capacity());
-
-    // scale adjust
-    ImGui::Text("Uniform Scale");
-    ImGui::SliderFloat("##scaleSlider", &modelScale, 0.01f, 1.0f, "%.3f");
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(80.0f);  // Make input box narrower
-    ImGui::InputFloat("Manual", &modelScale, 0.01f, 0.01f, "%.4f");
-    if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Precise scale value");
-
-    ImGui::SameLine();
-    if (ImGui::Button("Reset Scale")) {
-        modelScale = 0.01f;
-    }
-
-
-
-    if (ImGui::Button("Load Model"))
-    {
-        // delete old model if exist
-        currentModel = nullptr;
-
-        // else try to load new model
-        try
-        {
-            currentModel = std::make_unique<Model>(modelPath); 
-        }
-        catch (...)
-        {
-            ImGui::OpenPopup("Load Error");
-        }
-
-        if (ImGui::BeginPopupModal("Load Error", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
-            ImGui::Text("Failed to load model: %s", modelPath.c_str());
-            if (ImGui::Button("OK")) ImGui::CloseCurrentPopup();
-            ImGui::EndPopup();
-        }
-    }
-}
 
 
 void directionalLightChange()

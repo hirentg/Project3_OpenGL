@@ -2,16 +2,14 @@
 #ifndef MESH_H
 #define MESH_H
 
+#include <glad/glad.h> 
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
-#include "Shader.h"
-#include <glad/glad.h>
 
+#include "Shader.h"
 
 #include <string>
 #include <vector>
-#include <cstddef>  // for offsetof
-
 
 // Minimal data required for a mesh
 struct Vertex
@@ -28,123 +26,38 @@ struct Texture
 {
 	unsigned int id{};
 	std::string type{};		// e.g. diffuse or specular texture
-	std::string path{};		// for optimization - store the texture path to
-	// compare with other texture
+	std::string path{};		// for optimization
 };
-
 
 class Mesh
 {
 private:
-	// render data
+	// Render data
 	unsigned int m_VAO{};
 	unsigned int m_VBO{};
 	unsigned int m_EBO{};
 
+	// Helper function
 	void setupMesh();
 
 public:
-	// mesh data
+	// Mesh data
 	std::vector<Vertex> vertices{};
 	std::vector<unsigned int> indices{};
 	std::vector<Texture> textures{};
 
-	// constructor
-	Mesh(const std::vector<Vertex>& vertice, std::vector<unsigned int> indice, std::vector<Texture> texture)
-	{
-		vertices = vertice;
-		indices = indice;
-		textures = texture;
+	// Constructor
+	Mesh(const std::vector<Vertex>& vertice,
+		const std::vector<unsigned int>& indice,
+		const std::vector<Texture>& texture);
 
-		setupMesh();
-	}
-
-
+	// Draw
 	void Draw(Shader& shader) const;
-	unsigned int getVAO()
+
+	unsigned int getVAO() const
 	{
 		return m_VAO;
 	}
 };
 
-
-void Mesh::setupMesh()
-{
-	glGenBuffers(1, &m_VBO);
-	glGenVertexArrays(1, &m_VAO);
-	glGenBuffers(1, &m_EBO);
-
-	glBindVertexArray(m_VAO);
-	glBindBuffer(GL_ARRAY_BUFFER, m_VBO);
-	glBufferData(GL_ARRAY_BUFFER, vertices.size() * sizeof(Vertex), vertices.data(),
-		GL_STATIC_DRAW);
-
-	glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, m_EBO);
-	glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(unsigned int), indices.data(),
-		GL_STATIC_DRAW);
-
-	// vertex position
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)0);
-	glEnableVertexAttribArray(0);
-
-	// vertex normals
-	// macro offsetof(s, m) takes its 1st argument as a struct, 2nd argument a variable of 
-	// that struct. It returns the offset of that variable from the start of the struct
-	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Normal));
-	glEnableVertexAttribArray(1);
-
-	// vertex texture coordinates
-	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, TexCoords));
-	glEnableVertexAttribArray(2);
-
-	// vertex tangent
-	glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Tangent));
-	glEnableVertexAttribArray(3);
-
-	// vertex bitangent
-	glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), (void*)offsetof(Vertex, Bitangent));
-	glEnableVertexAttribArray(4);
-}
-
-
-void Mesh::Draw(Shader& shader) const
-{
-	// define N number of texture and specular textures
-	unsigned int diffuseN{ 1 };
-	unsigned int specularN{ 1 };
-	unsigned int normalNr{ 1 };
-	unsigned int heightNr{ 1 };
-
-	for (unsigned int i{ 0 }; i < textures.size(); ++i)
-	{
-		// Activate the corresponding texture unit before binding
-		glActiveTexture(GL_TEXTURE0 + i);
-		// retrieve texture number
-		std::string number{};
-		std::string name{ textures[i].type };
-
-		if (name == "texture_diffuse")
-			number = std::to_string(diffuseN++);	// assign first, then increment
-
-		else if (name == "texture_specular")
-			number = std::to_string(specularN++);
-
-		else if (name == "texture_normal")
-			number = std::to_string(normalNr++);
-
-		else if (name == "texture_height")
-			number = std::to_string(heightNr++);
-
-		shader.setInt(("material." + name + number).c_str(), i);
-		glBindTexture(GL_TEXTURE_2D, textures[i].id);
-	}
-
-	// draw mesh
-	glBindVertexArray(m_VAO);
-	glDrawElements(GL_TRIANGLES, indices.size(), GL_UNSIGNED_INT, 0);
-	glBindVertexArray(0);
-
-	// set everything back to default once configured
-	glActiveTexture(GL_TEXTURE0);
-}
 #endif // !MESH_H

@@ -1,208 +1,218 @@
-#include <glm/glm.hpp>
+#include "Model.h" // Includes the class declaration
+// #include "Mesh.h" // Already included in Model.h
+// #include "Shader.h" // Already included in Model.h
+#include "stb_image.h"
+
+#include <assimp/Importer.hpp>      
+#include <assimp/scene.h>           
+#include <assimp/postprocess.h>   
 
 #include <iostream>
-#include <glad/glad.h>
 
+// --- IMPLEMENTATION STARTS HERE ---
 
-#include "stb_image.h"
-#include "Shader.h"
-
-
-// render a 1x1 cube in NDC
-unsigned int cubeVAO{};
-unsigned int cubeVBO{};
-void renderCube()
+// Constructor
+Model::Model(const std::string& path)
 {
-	if (cubeVAO == 0)
+	loadModel(path);
+}
+
+// Draw
+void Model::Draw(Shader& shader)
+{
+	for (unsigned int i{ 0 }; i < m_meshes.size(); ++i)
 	{
-        float vertices[] = {
-            // back face
-            -1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f, 0.0f, 0.0f, // bottom-left
-             1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f, 1.0f, 1.0f, // top-right
-             1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f, 1.0f, 0.0f, // bottom-right         
-             1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f, 1.0f, 1.0f, // top-right
-            -1.0f, -1.0f, -1.0f,  0.0f,  0.0f, -1.0f, 0.0f, 0.0f, // bottom-left
-            -1.0f,  1.0f, -1.0f,  0.0f,  0.0f, -1.0f, 0.0f, 1.0f, // top-left
-            // front face
-            -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f, 0.0f, // bottom-left
-             1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 0.0f, // bottom-right
-             1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, // top-right
-             1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f, 1.0f, 1.0f, // top-right
-            -1.0f,  1.0f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f, 1.0f, // top-left
-            -1.0f, -1.0f,  1.0f,  0.0f,  0.0f,  1.0f, 0.0f, 0.0f, // bottom-left
-            // left face
-            -1.0f,  1.0f,  1.0f, -1.0f,  0.0f,  0.0f, 1.0f, 0.0f, // top-right
-            -1.0f,  1.0f, -1.0f, -1.0f,  0.0f,  0.0f, 1.0f, 1.0f, // top-left
-            -1.0f, -1.0f, -1.0f, -1.0f,  0.0f,  0.0f, 0.0f, 1.0f, // bottom-left
-            -1.0f, -1.0f, -1.0f, -1.0f,  0.0f,  0.0f, 0.0f, 1.0f, // bottom-left
-            -1.0f, -1.0f,  1.0f, -1.0f,  0.0f,  0.0f, 0.0f, 0.0f, // bottom-right
-            -1.0f,  1.0f,  1.0f, -1.0f,  0.0f,  0.0f, 1.0f, 0.0f, // top-right
-            // right face
-             1.0f,  1.0f,  1.0f,  1.0f,  0.0f,  0.0f, 1.0f, 0.0f, // top-left
-             1.0f, -1.0f, -1.0f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f, // bottom-right
-             1.0f,  1.0f, -1.0f,  1.0f,  0.0f,  0.0f, 1.0f, 1.0f, // top-right         
-             1.0f, -1.0f, -1.0f,  1.0f,  0.0f,  0.0f, 0.0f, 1.0f, // bottom-right
-             1.0f,  1.0f,  1.0f,  1.0f,  0.0f,  0.0f, 1.0f, 0.0f, // top-left
-             1.0f, -1.0f,  1.0f,  1.0f,  0.0f,  0.0f, 0.0f, 0.0f, // bottom-left     
-             // bottom face
-             -1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f, 0.0f, 1.0f, // top-right
-              1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f, 1.0f, 1.0f, // top-left
-              1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f, 1.0f, 0.0f, // bottom-left
-              1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f, 1.0f, 0.0f, // bottom-left
-             -1.0f, -1.0f,  1.0f,  0.0f, -1.0f,  0.0f, 0.0f, 0.0f, // bottom-right
-             -1.0f, -1.0f, -1.0f,  0.0f, -1.0f,  0.0f, 0.0f, 1.0f, // top-right
-             // top face
-             -1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f, 0.0f, 1.0f, // top-left
-              1.0f,  1.0f , 1.0f,  0.0f,  1.0f,  0.0f, 1.0f, 0.0f, // bottom-right
-              1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f, 1.0f, 1.0f, // top-right     
-              1.0f,  1.0f,  1.0f,  0.0f,  1.0f,  0.0f, 1.0f, 0.0f, // bottom-right
-             -1.0f,  1.0f, -1.0f,  0.0f,  1.0f,  0.0f, 0.0f, 1.0f, // top-left
-             -1.0f,  1.0f,  1.0f,  0.0f,  1.0f,  0.0f, 0.0f, 0.0f  // bottom-left        
-        };
-
-        glGenVertexArrays(1, &cubeVAO);
-        glBindVertexArray(cubeVAO);
-        glGenBuffers(1, &cubeVBO);
-        glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(3 * sizeof(float)));
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 3, GL_FLOAT, GL_FALSE, 8 * sizeof(float), (void*)(6 * sizeof(float)));
-        // reset when done
-        glBindBuffer(GL_ARRAY_BUFFER, cubeVBO);
-        glBindVertexArray(0);
-    }
-
-    // render
-    glBindVertexArray(cubeVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 36);
-    glBindVertexArray(0);
+		m_meshes[i].Draw(shader);
+	}
 }
 
-// load cubemap texture
-unsigned int loadCubeMap(const std::vector<std::string>& faces)
+void Model::loadModel(const std::string& path)
 {
-    unsigned int textureID{};
-    glGenTextures(1, &textureID);
-    glBindTexture(GL_TEXTURE_CUBE_MAP, textureID);
+	Assimp::Importer import{};
+	// flipUVs flip the y axis 
+	const aiScene* scene{ import.ReadFile(path, aiProcess_Triangulate
+										| aiProcess_FlipUVs | aiProcess_CalcTangentSpace) };
 
-    int width, height, nrChannels;
-    for (unsigned int i{ 0 }; i < faces.size(); ++i)
-    {
-        unsigned char* data = stbi_load(faces[i].c_str(), &width, &height, &nrChannels, 0);
-        if (data)
-        {
-            glTexImage2D(GL_TEXTURE_CUBE_MAP_POSITIVE_X + i, 0, GL_RGB, width, height, 0,
-                GL_RGB, GL_UNSIGNED_BYTE, data);
-            stbi_image_free(data);
-        }
-        else
-        {
-            std::cout << "Texture failed to load at path: " << faces[i] << '\n';
-            stbi_image_free(data);
-        }
-    }
+	if (!scene || scene->mFlags & AI_SCENE_FLAGS_INCOMPLETE || !scene->mRootNode)
+	{
+		std::cout << "ERROR::ASSIMP::" << import.GetErrorString() << '\n';
+		return;
+	}
 
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-    glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
-
-    return textureID;
+	m_directory = path.substr(0, path.find_last_of('/'));
+	processNode(scene->mRootNode, scene);
 }
 
-// render quad
-unsigned int quadVAO{};
-unsigned int quadVBO{};
-
-void renderQuad()
+void Model::processNode(aiNode* node, const aiScene* scene)
 {
-    if (!quadVAO)
-    {
-        // Positions
-        glm::vec3 pos1(-1.0, 1.0, 0.0);
-        glm::vec3 pos2(-1.0, -1.0, 0.0);
-        glm::vec3 pos3(1.0, -1.0, 0.0);
-        glm::vec3 pos4(1.0, 1.0, 0.0);
+	for (unsigned int i{ 0 }; i < node->mNumMeshes; ++i)
+	{
+		aiMesh* mesh{ scene->mMeshes[node->mMeshes[i]] };
+		m_meshes.push_back(processMesh(mesh, scene));
+	}
 
-        // Texture coordinates
-        glm::vec2 uv1(0.0, 1.0);
-        glm::vec2 uv2(0.0, 0.0);
-        glm::vec2 uv3(1.0, 0.0);
-        glm::vec2 uv4(1.0, 1.0);
+	for (unsigned int i{ 0 }; i < node->mNumChildren; ++i)
+	{
+		processNode(node->mChildren[i], scene);
+	}
+}
 
-        // Normal
-        glm::vec3 nm(0.0, 0.0, 1.0);
+Mesh Model::processMesh(aiMesh* mesh, const aiScene* scene)
+{
+	std::vector<Vertex> vertices{};
+	std::vector<unsigned int> indices{};
+	std::vector<Texture> textures{};
 
-        glm::vec3 tangent1, tangent2;
-        glm::vec3 bitangent1, bitangent2;
+	for (unsigned int i{ 0 }; i < mesh->mNumVertices; ++i)
+	{
+		Vertex vertex{};
+		glm::vec3 vector{};
 
-        glm::vec3 edge1 = pos2 - pos1;
-        glm::vec3 edge2 = pos3 - pos1;
+		// Positions
+		vector.x = mesh->mVertices[i].x;
+		vector.y = mesh->mVertices[i].y;
+		vector.z = mesh->mVertices[i].z;
+		vertex.Position = vector;
 
-        glm::vec2 deltaUV1 = uv2 - uv1;
-        glm::vec2 deltaUV2 = uv3 - uv1;
+		// Normals
+		if (mesh->HasNormals())
+		{
+			vector.x = mesh->mNormals[i].x;
+			vector.y = mesh->mNormals[i].y;
+			vector.z = mesh->mNormals[i].z;
+			vertex.Normal = vector;
+		}
 
-        float f = 1.0 / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
+		// Texture Coordinates
+		if (mesh->mTextureCoords[0])
+		{
+			glm::vec2 vec{};
+			vec.x = mesh->mTextureCoords[0][i].x;
+			vec.y = mesh->mTextureCoords[0][i].y;
+			vertex.TexCoords = vec;
 
-        tangent1.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
-        tangent1.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
-        tangent1.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
+			// Tangent
+			vector.x = mesh->mTangents[i].x;
+			vector.y = mesh->mTangents[i].y;
+			vector.z = mesh->mTangents[i].z;
+			vertex.Tangent = vector;
 
-        bitangent1.x = f * (deltaUV2.x * edge1.x - deltaUV1.x * edge2.x);
-        bitangent1.y = f * (deltaUV2.x * edge1.y - deltaUV1.x * edge2.y);
-        bitangent1.z = f * (deltaUV2.x * edge1.z - deltaUV1.x * edge2.z);
+			// Bitangent
+			vector.x = mesh->mBitangents[i].x;
+			vector.y = mesh->mBitangents[i].y;
+			vector.z = mesh->mBitangents[i].z;
+			vertex.Bitangent = vector;
+		}
+		else
+			vertex.TexCoords = glm::vec2(0.0f, 0.0f);
 
-        // 2nd triangle
-        edge1 = pos3 - pos1;
-        edge2 = pos4 - pos1;
+		vertices.push_back(vertex);
+	}
 
-        deltaUV1 = uv3 - uv1;
-        deltaUV2 = uv4 - uv1;
+	for (unsigned int i{ 0 }; i < mesh->mNumFaces; ++i)
+	{
+		aiFace face{ mesh->mFaces[i] };
+		for (unsigned int j{ 0 }; j < face.mNumIndices; ++j)
+		{
+			indices.push_back(face.mIndices[j]);
+		}
+	}
 
-        f = 1.0 / (deltaUV1.x * deltaUV2.y - deltaUV1.y * deltaUV2.x);
+	if (mesh->mMaterialIndex >= 0)
+	{
+		aiMaterial* material = scene->mMaterials[mesh->mMaterialIndex];
 
-        tangent2.x = f * (deltaUV2.y * edge1.x - deltaUV1.y * edge2.x);
-        tangent2.y = f * (deltaUV2.y * edge1.y - deltaUV1.y * edge2.y);
-        tangent2.z = f * (deltaUV2.y * edge1.z - deltaUV1.y * edge2.z);
+		std::vector<Texture> diffuseMaps{ loadMaterialTextures(material, aiTextureType_DIFFUSE, "texture_diffuse") };
+		std::vector<Texture> specularMaps{ loadMaterialTextures(material, aiTextureType_SPECULAR, "texture_specular") };
+		std::vector<Texture> normalMaps{ loadMaterialTextures(material, aiTextureType_HEIGHT, "texture_normal") };
 
-        bitangent2.x = f * (deltaUV2.x * edge1.x - deltaUV1.x * edge2.x);
-        bitangent2.y = f * (deltaUV2.x * edge1.y - deltaUV1.x * edge2.y);
-        bitangent2.z = f * (deltaUV2.x * edge1.z - deltaUV1.x * edge2.z);
+		if (normalMaps.empty())
+		{
+			std::vector<Texture> dispMaps = loadMaterialTextures(material, aiTextureType_DISPLACEMENT, "texture_normal");
+			normalMaps.insert(normalMaps.end(), dispMaps.begin(), dispMaps.end());
+		}
 
-        float quadVertices[] = {
-            // positions            // normal         // texcoords  // tangent                          // bitangent
-            pos1.x, pos1.y, pos1.z, nm.x, nm.y, nm.z, uv1.x, uv1.y, tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
-            pos2.x, pos2.y, pos2.z, nm.x, nm.y, nm.z, uv2.x, uv2.y, tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
-            pos3.x, pos3.y, pos3.z, nm.x, nm.y, nm.z, uv3.x, uv3.y, tangent1.x, tangent1.y, tangent1.z, bitangent1.x, bitangent1.y, bitangent1.z,
+		std::vector<Texture> heightMaps{ loadMaterialTextures(material, aiTextureType_AMBIENT, "texture_height") };
 
-            pos1.x, pos1.y, pos1.z, nm.x, nm.y, nm.z, uv1.x, uv1.y, tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z,
-            pos3.x, pos3.y, pos3.z, nm.x, nm.y, nm.z, uv3.x, uv3.y, tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z,
-            pos4.x, pos4.y, pos4.z, nm.x, nm.y, nm.z, uv4.x, uv4.y, tangent2.x, tangent2.y, tangent2.z, bitangent2.x, bitangent2.y, bitangent2.z
-        };
-        // setup plane VAO
-        glGenVertexArrays(1, &quadVAO);
-        glGenBuffers(1, &quadVBO);
-        glBindVertexArray(quadVAO);
-        glBindBuffer(GL_ARRAY_BUFFER, quadVBO);
-        glBufferData(GL_ARRAY_BUFFER, sizeof(quadVertices), &quadVertices, GL_STATIC_DRAW);
-        glEnableVertexAttribArray(0);
-        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)0);
-        glEnableVertexAttribArray(1);
-        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(3 * sizeof(float)));
-        glEnableVertexAttribArray(2);
-        glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(6 * sizeof(float)));
-        glEnableVertexAttribArray(3);
-        glVertexAttribPointer(3, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(8 * sizeof(float)));
-        glEnableVertexAttribArray(4);
-        glVertexAttribPointer(4, 3, GL_FLOAT, GL_FALSE, 14 * sizeof(float), (void*)(11 * sizeof(float)));
+		textures.insert(textures.end(), diffuseMaps.begin(), diffuseMaps.end());
+		textures.insert(textures.end(), specularMaps.begin(), specularMaps.end());
+		textures.insert(textures.end(), normalMaps.begin(), normalMaps.end());
+		textures.insert(textures.end(), heightMaps.begin(), heightMaps.end());
+	}
 
-    }
+	return Mesh(vertices, indices, textures);
+}
 
-    glBindVertexArray(quadVAO);
-    glDrawArrays(GL_TRIANGLES, 0, 6);
+std::vector<Texture> Model::loadMaterialTextures(aiMaterial* mat, aiTextureType type, std::string typeName)
+{
+	std::vector<Texture> textures{};
+
+	for (unsigned int i{ 0 }; i < mat->GetTextureCount(type); ++i)
+	{
+		aiString str{};
+		mat->GetTexture(type, i, &str);
+		bool skip{ false };
+
+		for (unsigned int j{ 0 }; j < texture_loaded.size(); ++j)
+		{
+			if (std::strcmp(texture_loaded[j].path.data(), str.C_Str()) == 0)
+			{
+				textures.push_back(texture_loaded[j]);
+				skip = true;
+				break;
+			}
+		}
+
+		if (!skip)
+		{
+			Texture texture{};
+			texture.id = TextureFromFile(str.C_Str(), m_directory);
+			texture.type = typeName;
+			texture.path = str.C_Str();
+			textures.push_back(texture);
+			texture_loaded.push_back(texture);
+		}
+	}
+	return textures;
+}
+
+// Standalone function implementation (NOT part of Model class)
+unsigned int TextureFromFile(const char* path, const std::string& directory)
+{
+	std::string filename = std::string{ path };
+	filename = directory + '/' + filename;
+
+	unsigned int textureID{};
+	glGenTextures(1, &textureID);
+
+	int width, height, nrComponents;
+	unsigned char* data{ stbi_load(filename.c_str(), &width, &height, &nrComponents, 0) };
+	if (data)
+	{
+		GLenum format{};
+		if (nrComponents == 1)
+			format = GL_RED;
+		else if (nrComponents == 3)
+			format = GL_RGB;
+		else if (nrComponents == 4)
+			format = GL_RGBA;
+
+		glBindTexture(GL_TEXTURE_2D, textureID);
+		glTexImage2D(GL_TEXTURE_2D, 0, format, width, height, 0, format, GL_UNSIGNED_BYTE, data);
+		glGenerateMipmap(GL_TEXTURE_2D);
+
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR_MIPMAP_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+		stbi_image_free(data);
+	}
+	else
+	{
+		std::cout << "Failed to load at path: " << path << '\n';
+		stbi_image_free(data);
+	}
+
+	return textureID;
 }
